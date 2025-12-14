@@ -21,9 +21,9 @@ class ImageCacheService {
   private preloadQueue: Set<string> = new Set();
   private observedElements: Map<string, HTMLElement> = new Map();
   private intersectionObserver: IntersectionObserver | null = null;
-  private readonly CACHE_TTL = 30 * 60 * 1000; // 30 minutes
-  private readonly MAX_CACHE_SIZE = 200;
-  private readonly CONCURRENT_LOADS = 8; // Increased for faster loading
+  private readonly CACHE_TTL = 60 * 60 * 1000; // 60 minutes for longer cache
+  private readonly MAX_CACHE_SIZE = 500; // Larger cache for more images
+  private readonly CONCURRENT_LOADS = 15; // Much higher concurrency for fast loading
   private activeLoads = 0;
   private loadPromises: Map<string, Promise<boolean>> = new Map();
 
@@ -44,7 +44,7 @@ class ImageCacheService {
         });
       },
       {
-        rootMargin: '200px', // Start loading 200px before visible
+        rootMargin: '600px', // Start loading 600px before visible for earlier preload
         threshold: 0,
       }
     );

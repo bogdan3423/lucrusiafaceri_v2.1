@@ -22,6 +22,8 @@ export default function PostCard({ post }: PostCardProps) {
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const videoCarouselRef = useRef<HTMLDivElement>(null);
 
   // Get media array
   const media: MediaItem[] = React.useMemo(() => {
@@ -85,7 +87,7 @@ export default function PostCard({ post }: PostCardProps) {
           className={`w-full h-full object-cover ${className}`}
           muted
           playsInline
-          preload="metadata"
+          preload={index === 0 ? 'auto' : 'metadata'}
           poster={item.thumbnailUrl}
           onClick={(e) => e.stopPropagation()}
         />
@@ -134,7 +136,7 @@ export default function PostCard({ post }: PostCardProps) {
               className="w-full h-full object-cover"
               controls
               playsInline
-              preload="metadata"
+              preload={index === 0 ? 'auto' : 'metadata'}
               poster={item.thumbnailUrl}
             />
           </div>
@@ -161,7 +163,7 @@ export default function PostCard({ post }: PostCardProps) {
               className="w-full h-full object-cover"
               controls
               playsInline
-              preload="metadata"
+              preload="auto"
               poster={item.thumbnailUrl}
             />
           </div>
@@ -178,6 +180,83 @@ export default function PostCard({ post }: PostCardProps) {
     }
 
     if (media.length === 2) {
+      // Check if both items are videos - use swipeable carousel
+      const allVideos = media.every(item => item.type === 'video');
+      
+      if (allVideos) {
+        return (
+          <div className="relative aspect-square sm:aspect-[4/3] overflow-hidden bg-gray-100">
+            {/* Swipeable container */}
+            <div
+              ref={videoCarouselRef}
+              className="flex h-full transition-transform duration-300 ease-out"
+              style={{ transform: `translateX(-${currentVideoIndex * 100}%)` }}
+              onTouchStart={(e) => {
+                const touch = e.touches[0];
+                videoCarouselRef.current?.setAttribute('data-touch-start', touch.clientX.toString());
+              }}
+              onTouchEnd={(e) => {
+                const startX = parseFloat(videoCarouselRef.current?.getAttribute('data-touch-start') || '0');
+                const endX = e.changedTouches[0].clientX;
+                const diff = startX - endX;
+                
+                if (Math.abs(diff) > 50) {
+                  if (diff > 0 && currentVideoIndex < media.length - 1) {
+                    setCurrentVideoIndex(prev => prev + 1);
+                  } else if (diff < 0 && currentVideoIndex > 0) {
+                    setCurrentVideoIndex(prev => prev - 1);
+                  }
+                }
+              }}
+            >
+              {media.map((item, index) => (
+                <div key={index} className="w-full h-full flex-shrink-0">
+                  <video
+                    src={`${item.url}#t=0.1`}
+                    className="w-full h-full object-cover"
+                    controls
+                    playsInline
+                    preload={index === 0 ? 'auto' : 'metadata'}
+                    poster={item.thumbnailUrl}
+                  />
+                </div>
+              ))}
+            </div>
+            
+            {/* Navigation arrows */}
+            {currentVideoIndex > 0 && (
+              <button
+                onClick={() => setCurrentVideoIndex(prev => prev - 1)}
+                className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-white/80 hover:bg-white rounded-full flex items-center justify-center shadow-lg z-10"
+              >
+                <ChevronLeft className="w-5 h-5 text-gray-800" />
+              </button>
+            )}
+            {currentVideoIndex < media.length - 1 && (
+              <button
+                onClick={() => setCurrentVideoIndex(prev => prev + 1)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-white/80 hover:bg-white rounded-full flex items-center justify-center shadow-lg z-10"
+              >
+                <ChevronRight className="w-5 h-5 text-gray-800" />
+              </button>
+            )}
+            
+            {/* Dots indicator */}
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+              {media.map((_, index) => (
+                <button
+                  key={index}
+                  onClick={() => setCurrentVideoIndex(index)}
+                  className={`w-2 h-2 rounded-full transition-colors ${
+                    index === currentVideoIndex ? 'bg-white' : 'bg-white/50'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      }
+      
       return (
         <div className="grid grid-cols-2 gap-0.5 aspect-[2/1] sm:aspect-[2/1]">
           {media.map((item, index) => renderGridItem(item, index))}
@@ -218,7 +297,7 @@ export default function PostCard({ post }: PostCardProps) {
                   className="w-full h-full object-cover"
                   controls
                   playsInline
-                  preload="metadata"
+                  preload={index === 0 ? 'auto' : 'metadata'}
                   poster={item.thumbnailUrl}
                 />
                 {index === 3 && remainingCount > 0 && (

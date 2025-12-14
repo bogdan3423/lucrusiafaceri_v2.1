@@ -123,7 +123,9 @@ const OptimizedImage = memo(function OptimizedImage({
         `}
         style={{ visibility: isReady ? 'visible' : 'hidden' }}
         loading={priority ? 'eager' : 'lazy'}
-        decoding="async"
+        decoding={priority ? 'sync' : 'async'}
+        // @ts-ignore - fetchPriority is a valid HTML attribute
+        fetchPriority={priority ? 'high' : 'auto'}
         onLoad={handleImageLoad}
         onError={handleImageError}
       />

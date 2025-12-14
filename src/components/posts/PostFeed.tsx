@@ -36,18 +36,21 @@ function extractImageUrls(posts: Post[]): string[] {
 }
 
 // Preload images before rendering
-async function preloadPostImages(posts: Post[], priorityCount = 4): Promise<void> {
+async function preloadPostImages(posts: Post[], priorityCount = 8): Promise<void> {
   const urls = extractImageUrls(posts);
   
-  // Preload priority images (first few posts) with high priority
-  const priorityUrls = urls.slice(0, priorityCount * 2); // ~2 images per post
+  // Preload priority images (first few posts) with high priority - more aggressive
+  const priorityUrls = urls.slice(0, priorityCount * 3); // ~3 images per post
   const promises = priorityUrls.map(url => imageCache.preload(url, 'high'));
   
-  // Queue remaining for background loading
-  urls.slice(priorityCount * 2).forEach(url => imageCache.preload(url, 'low'));
+  // Queue ALL remaining for background loading immediately
+  urls.slice(priorityCount * 3).forEach(url => imageCache.preload(url, 'low'));
   
-  // Wait for priority images to load
-  await Promise.all(promises);
+  // Wait for priority images to load (but with timeout to not block UI)
+  await Promise.race([
+    Promise.all(promises),
+    new Promise(resolve => setTimeout(resolve, 1500)) // Max 1.5s wait
+  ]);
 }
 
 interface PostFeedProps {
@@ -68,11 +71,11 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  // Preload images when posts change
+  // Preload images when posts change - aggressive preloading
   useEffect(() => {
     if (posts.length > 0) {
-      // Preload first 4 posts with high priority, rest in background
-      preloadPostImages(posts.slice(0, 8), 4);
+      // Preload first 12 posts with high priority, rest in background
+      preloadPostImages(posts.slice(0, 16), 8);
     }
   }, [posts]);
 
