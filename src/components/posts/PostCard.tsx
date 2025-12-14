@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import Link from 'next/link';
-import { MapPin, Clock, Heart, MessageCircle, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { MapPin, Clock, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Post, MediaItem } from '@/types';
 import { formatDate, formatPrice } from '@/lib/utils';
 import OptimizedImage from '@/components/ui/OptimizedImage';
@@ -19,7 +19,6 @@ interface PostCardProps {
 }
 
 export default function PostCard({ post }: PostCardProps) {
-  const [liked, setLiked] = useState(false);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -310,22 +309,10 @@ export default function PostCard({ post }: PostCardProps) {
         {/* Actions */}
         <div className="px-3 py-3 md:px-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => setLiked(!liked)}
-              className={`transition-colors ${liked ? 'text-red-500' : 'text-gray-600 hover:text-red-500'}`}
-            >
-              <Heart className={`w-6 h-6 ${liked ? 'fill-current' : ''}`} />
-            </button>
-            <Link href={`/postare/${post.id}`} className="text-gray-600 hover:text-blue-500">
-              <MessageCircle className="w-6 h-6" />
-            </Link>
             <button className="text-gray-600 hover:text-green-500">
               <Share2 className="w-6 h-6" />
             </button>
           </div>
-          {(post.saves ?? 0) > 0 && (
-            <span className="text-sm text-gray-500">{post.saves} aprecieri</span>
-          )}
         </div>
 
         {/* Content */}

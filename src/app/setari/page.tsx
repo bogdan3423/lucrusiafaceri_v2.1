@@ -11,8 +11,6 @@ import Image from 'next/image';
 import { 
   User, 
   Lock, 
-  Bell, 
-  Shield, 
   LogOut,
   ChevronRight,
   Loader2,
@@ -116,23 +114,6 @@ function SettingsContent() {
           label: 'Schimbă parola',
           description: 'Actualizează parola contului',
           href: '/schimba-parola',
-        },
-      ],
-    },
-    {
-      title: 'Preferințe',
-      items: [
-        {
-          icon: <Bell className="w-5 h-5" />,
-          label: 'Notificări',
-          description: 'Configurează notificările',
-          href: '/setari/notificari',
-        },
-        {
-          icon: <Shield className="w-5 h-5" />,
-          label: 'Confidențialitate',
-          description: 'Setări de confidențialitate',
-          href: '/setari/confidentialitate',
         },
       ],
     },
