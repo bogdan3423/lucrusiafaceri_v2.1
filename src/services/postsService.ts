@@ -48,30 +48,61 @@ function docToPost(doc: QueryDocumentSnapshot | DocumentSnapshot): Post {
     throw new Error('Document data is undefined');
   }
 
-  // REAL field: fileUrls contains array of full image URLs
-  // Also check for fileUrl (single) and imageUrl (legacy)
+  // Check for images in multiple field formats (new and legacy)
   const imageUrls: string[] = [];
+  const videoUrls: string[] = [];
   
-  if (data.fileUrls && Array.isArray(data.fileUrls)) {
-    imageUrls.push(...data.fileUrls);
-  } else if (data.fileUrl && typeof data.fileUrl === 'string') {
-    imageUrls.push(data.fileUrl);
-  } else if (data.imageUrl && typeof data.imageUrl === 'string') {
-    imageUrls.push(data.imageUrl);
+  // Helper to check if URL is a video
+  const isVideoUrl = (url: string) => {
+    const lowerUrl = url.toLowerCase();
+    return lowerUrl.includes('.mp4') || 
+           lowerUrl.includes('.webm') || 
+           lowerUrl.includes('.mov') ||
+           lowerUrl.includes('.avi') ||
+           lowerUrl.includes('video');
+  };
+  
+  // New format: images and videos arrays (only if they have content)
+  if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+    imageUrls.push(...data.images);
+  }
+  if (data.videos && Array.isArray(data.videos) && data.videos.length > 0) {
+    videoUrls.push(...data.videos);
   }
   
-  // Build media array from images
-  const media: MediaItem[] = imageUrls.map((url: string) => {
-    // Check file type to determine if video
-    const isVideo = data.fileType?.includes('video') || 
-                    url.includes('.mp4') || 
-                    url.includes('.webm') ||
-                    url.includes('.mov');
-    return {
+  // Legacy format: fileUrls, fileUrl, imageUrl (only if no images/videos found)
+  if (imageUrls.length === 0 && videoUrls.length === 0) {
+    if (data.fileUrls && Array.isArray(data.fileUrls) && data.fileUrls.length > 0) {
+      // Separate videos and images based on URL or fileType
+      data.fileUrls.forEach((url: string) => {
+        if (data.fileType?.includes('video') || isVideoUrl(url)) {
+          videoUrls.push(url);
+        } else {
+          imageUrls.push(url);
+        }
+      });
+    } else if (data.fileUrl && typeof data.fileUrl === 'string') {
+      if (data.fileType?.includes('video') || isVideoUrl(data.fileUrl)) {
+        videoUrls.push(data.fileUrl);
+      } else {
+        imageUrls.push(data.fileUrl);
+      }
+    } else if (data.imageUrl && typeof data.imageUrl === 'string') {
+      imageUrls.push(data.imageUrl);
+    }
+  }
+  
+  // Build media array from images and videos
+  const media: MediaItem[] = [
+    ...imageUrls.map((url: string) => ({
       url,
-      type: isVideo ? 'video' as const : 'image' as const,
-    };
-  });
+      type: 'image' as const,
+    })),
+    ...videoUrls.map((url: string) => ({
+      url,
+      type: 'video' as const,
+    })),
+  ];
 
   return {
     id: doc.id,
@@ -82,7 +113,7 @@ function docToPost(doc: QueryDocumentSnapshot | DocumentSnapshot): Post {
     location: data.sellerCity || data.location || '', // REAL field is 'sellerCity'
     category: data.category,
     images: imageUrls, // Use extracted image URLs
-    videos: [], // Videos are in fileUrls based on fileType
+    videos: videoUrls, // Use extracted video URLs
     media,
     userId: data.sellerId || data.userId, // REAL field is 'sellerId'
     sellerId: data.sellerId,
