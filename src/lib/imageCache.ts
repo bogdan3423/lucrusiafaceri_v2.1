@@ -23,8 +23,9 @@ class ImageCacheService {
   private intersectionObserver: IntersectionObserver | null = null;
   private readonly CACHE_TTL = 30 * 60 * 1000; // 30 minutes
   private readonly MAX_CACHE_SIZE = 200;
-  private readonly CONCURRENT_LOADS = 4;
+  private readonly CONCURRENT_LOADS = 8; // Increased for faster loading
   private activeLoads = 0;
+  private loadPromises: Map<string, Promise<boolean>> = new Map();
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -66,13 +67,17 @@ class ImageCacheService {
 
   /**
    * Preload an image with priority
+   * Returns a promise that resolves when the image is loaded
    */
   async preload(url: string, priority: 'high' | 'low' = 'low'): Promise<boolean> {
     if (!url) return false;
 
     const cached = this.cache.get(url);
     if (cached?.loaded) return true;
-    if (cached?.loading) return false;
+    
+    // If already loading, return existing promise
+    const existingPromise = this.loadPromises.get(url);
+    if (existingPromise) return existingPromise;
 
     // Add to cache as loading
     this.cache.set(url, {
@@ -84,7 +89,9 @@ class ImageCacheService {
     });
 
     if (priority === 'high') {
-      return this.loadImage(url);
+      const promise = this.loadImage(url);
+      this.loadPromises.set(url, promise);
+      return promise;
     } else {
       this.preloadQueue.add(url);
       this.processQueue();
@@ -107,6 +114,7 @@ class ImageCacheService {
           cached.timestamp = Date.now();
         }
         this.activeLoads--;
+        this.loadPromises.delete(url);
         this.processQueue();
         resolve(true);
       };
@@ -118,6 +126,7 @@ class ImageCacheService {
           cached.loading = false;
         }
         this.activeLoads--;
+        this.loadPromises.delete(url);
         this.processQueue();
         resolve(false);
       };

@@ -1,11 +1,11 @@
 'use client';
 
 /**
- * Media Carousel - Optimized with CSS-based sliding and instant image loading
+ * Media Carousel - Premium loading without visible placeholders
  * - All media rendered at once, no re-renders on navigation
  * - CSS transform for smooth, instant sliding
- * - LQIP placeholders for instant visual feedback
- * - Intelligent preloading with caching
+ * - Images appear only when fully loaded
+ * - No visible loading states
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';

@@ -1,12 +1,11 @@
 'use client';
 
 /**
- * Optimized Image Component
- * - Instant display with blur placeholder (LQIP effect)
- * - Background loading of full resolution
- * - Smooth transition when loaded
- * - Viewport-aware priority loading
- * - Cached to prevent re-fetching
+ * Premium Image Component
+ * - NO visible placeholders or loading states
+ * - Images appear only when fully loaded
+ * - Layout dimensions reserved to prevent shift
+ * - Invisible loading - user never sees loading states
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react';
@@ -24,29 +23,7 @@ interface OptimizedImageProps {
   onLoad?: () => void;
   onError?: () => void;
   onClick?: () => void;
-  showPlaceholder?: boolean;
-}
-
-// Generate a dominant color placeholder based on URL hash
-function generatePlaceholderColor(url: string): string {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    const char = url.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  
-  // Generate soft, pleasant colors
-  const hue = Math.abs(hash % 360);
-  return `hsl(${hue}, 20%, 90%)`;
-}
-
-// Tiny SVG blur placeholder (inlined, no network request)
-function getBlurPlaceholder(color: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8">
-    <rect width="8" height="8" fill="${color}"/>
-  </svg>`;
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
+  showPlaceholder?: boolean; // Kept for API compatibility, but ignored
 }
 
 const OptimizedImage = memo(function OptimizedImage({
@@ -60,39 +37,35 @@ const OptimizedImage = memo(function OptimizedImage({
   onLoad,
   onError,
   onClick,
-  showPlaceholder = true,
 }: OptimizedImageProps) {
-  const [isLoaded, setIsLoaded] = useState(() => imageCache.isLoaded(src));
+  // Check cache synchronously for instant display
+  const [isReady, setIsReady] = useState(() => imageCache.isLoaded(src));
   const [hasError, setHasError] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // Generate placeholder color based on URL
-  const placeholderColor = generatePlaceholderColor(src || '');
-  const blurPlaceholder = getBlurPlaceholder(placeholderColor);
 
-  // Register with cache and start loading
+  // Preload and track loading state
   useEffect(() => {
     if (!src) return;
 
-    // Check if already cached
+    // Already cached - show immediately
     if (imageCache.isLoaded(src)) {
-      setIsLoaded(true);
+      setIsReady(true);
       return;
     }
+
+    // Start preloading with appropriate priority
+    imageCache.preload(src, priority ? 'high' : 'low').then((loaded) => {
+      if (loaded) {
+        setIsReady(true);
+        onLoad?.();
+      }
+    });
 
     // Observe for viewport visibility if not priority
     if (!priority && containerRef.current) {
       imageCache.observe(containerRef.current, src);
     }
-
-    // Start preloading
-    imageCache.preload(src, priority ? 'high' : 'low').then((loaded) => {
-      if (loaded) {
-        setIsLoaded(true);
-        onLoad?.();
-      }
-    });
 
     return () => {
       if (containerRef.current) {
@@ -102,7 +75,7 @@ const OptimizedImage = memo(function OptimizedImage({
   }, [src, priority, onLoad]);
 
   const handleImageLoad = () => {
-    setIsLoaded(true);
+    setIsReady(true);
     onLoad?.();
   };
 
@@ -120,14 +93,15 @@ const OptimizedImage = memo(function OptimizedImage({
 
   const objectFitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
 
+  // Error state - show error icon
   if (hasError) {
     return (
       <div 
         ref={containerRef}
-        className={`flex items-center justify-center bg-gray-100 text-gray-400 ${aspectClasses[aspectRatio]} ${containerClassName}`}
+        className={`flex items-center justify-center bg-gray-50 text-gray-300 ${aspectClasses[aspectRatio]} ${containerClassName}`}
         onClick={onClick}
       >
-        <ImageOff className="w-8 h-8" />
+        <ImageOff className="w-6 h-6" />
       </div>
     );
   }
@@ -135,30 +109,19 @@ const OptimizedImage = memo(function OptimizedImage({
   return (
     <div 
       ref={containerRef}
-      className={`relative overflow-hidden ${aspectClasses[aspectRatio]} ${containerClassName}`}
+      className={`relative overflow-hidden bg-gray-50 ${aspectClasses[aspectRatio]} ${containerClassName}`}
       onClick={onClick}
-      style={{ backgroundColor: placeholderColor }}
     >
-      {/* Blur placeholder - shows immediately */}
-      {showPlaceholder && !isLoaded && (
-        <img
-          src={blurPlaceholder}
-          alt=""
-          className={`absolute inset-0 w-full h-full ${objectFitClass} blur-sm scale-110`}
-          aria-hidden="true"
-        />
-      )}
-      
-      {/* Main image */}
+      {/* Image - visible only when fully loaded, no transition */}
       <img
         ref={imgRef}
         src={src}
         alt={alt}
         className={`
           w-full h-full ${objectFitClass} ${className}
-          transition-opacity duration-200 ease-out
-          ${isLoaded ? 'opacity-100' : 'opacity-0'}
+          ${isReady ? 'opacity-100' : 'opacity-0'}
         `}
+        style={{ visibility: isReady ? 'visible' : 'hidden' }}
         loading={priority ? 'eager' : 'lazy'}
         decoding="async"
         onLoad={handleImageLoad}
@@ -169,44 +132,3 @@ const OptimizedImage = memo(function OptimizedImage({
 });
 
 export default OptimizedImage;
-
-/**
- * Preload images helper - call before rendering feed
- */
-export function preloadImages(urls: string[], priorityCount = 3) {
-  const priorityIndices = Array.from({ length: Math.min(priorityCount, urls.length) }, (_, i) => i);
-  imageCache.preloadBatch(urls, priorityIndices);
-}
-
-/**
- * Hook for preloading post images
- */
-export function usePreloadPostImages(posts: { media?: { url: string }[]; images?: string[] }[]) {
-  useEffect(() => {
-    const allUrls: string[] = [];
-    
-    posts.forEach((post, postIndex) => {
-      const urls: string[] = [];
-      
-      if (post.media?.length) {
-        post.media.forEach(m => {
-          if (m.url) urls.push(m.url);
-        });
-      } else if (post.images?.length) {
-        urls.push(...post.images);
-      }
-      
-      // First 3 posts get priority, first image of each
-      urls.forEach((url, imgIndex) => {
-        if (postIndex < 3 && imgIndex === 0) {
-          imageCache.preload(url, 'high');
-        } else {
-          allUrls.push(url);
-        }
-      });
-    });
-    
-    // Queue remaining images
-    allUrls.forEach(url => imageCache.preload(url, 'low'));
-  }, [posts]);
-}

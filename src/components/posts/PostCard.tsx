@@ -3,7 +3,7 @@
 /**
  * Post Card - Instagram-style grid layout with lightbox
  * Grid display in feed, swipeable fullscreen modal on click
- * Optimized with instant image loading via LQIP placeholders
+ * Premium loading: images appear only when ready, no visible loading states
  */
 
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
