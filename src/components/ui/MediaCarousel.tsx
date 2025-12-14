@@ -1,15 +1,18 @@
 'use client';
 
 /**
- * Media Carousel - Optimized with CSS-based sliding
+ * Media Carousel - Optimized with CSS-based sliding and instant image loading
  * - All media rendered at once, no re-renders on navigation
  * - CSS transform for smooth, instant sliding
- * - Preloads all images on mount
+ * - LQIP placeholders for instant visual feedback
+ * - Intelligent preloading with caching
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX, ImageOff } from 'lucide-react';
 import { MediaItem } from '@/types';
+import OptimizedImage from '@/components/ui/OptimizedImage';
+import { imageCache } from '@/lib/imageCache';
 
 interface MediaCarouselProps {
   media: MediaItem[];
@@ -24,14 +27,16 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
   const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
   const touchStartX = useRef<number>(0);
 
-  // Preload ALL images immediately
+  // Preload ALL images immediately with caching
   useEffect(() => {
-    media.forEach((item) => {
-      if (item.type === 'image' && item.url) {
-        const img = new Image();
-        img.src = item.url;
-      }
-    });
+    const imageUrls = media
+      .filter(item => item.type === 'image' && item.url)
+      .map(item => item.url);
+    
+    if (imageUrls.length > 0) {
+      // First image is high priority, rest are queued
+      imageCache.preloadBatch(imageUrls, [0]);
+    }
   }, [media]);
 
   // Navigation with useCallback to prevent re-renders
@@ -159,12 +164,12 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
                 <span className="text-sm">Imagine indisponibilă</span>
               </div>
             ) : (
-              <img
+              <OptimizedImage
                 src={item.url}
                 alt=""
-                className="w-full h-full object-cover"
-                loading={index === 0 ? 'eager' : 'lazy'}
-                decoding="async"
+                containerClassName="w-full h-full"
+                priority={index === 0 || index === currentIndex}
+                objectFit="cover"
                 onError={() => handleImageError(index)}
               />
             )}

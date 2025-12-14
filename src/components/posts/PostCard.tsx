@@ -3,13 +3,16 @@
 /**
  * Post Card - Instagram-style grid layout with lightbox
  * Grid display in feed, swipeable fullscreen modal on click
+ * Optimized with instant image loading via LQIP placeholders
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import Link from 'next/link';
 import { MapPin, Clock, Heart, MessageCircle, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Post, MediaItem } from '@/types';
 import { formatDate, formatPrice } from '@/lib/utils';
+import OptimizedImage from '@/components/ui/OptimizedImage';
+import { imageCache } from '@/lib/imageCache';
 
 interface PostCardProps {
   post: Post;
@@ -38,14 +41,12 @@ export default function PostCard({ post }: PostCardProps) {
   const authorName = post.userName || 'Anonim';
   const authorImage = post.userImage;
 
-  // Preload images
+  // Preload images with priority caching (first image high priority)
   useEffect(() => {
-    media.forEach(item => {
-      if (item.type === 'image' && item.url) {
-        const img = new Image();
-        img.src = item.url;
-      }
-    });
+    const imageUrls = media.filter(m => m.type === 'image').map(m => m.url);
+    if (imageUrls.length > 0) {
+      imageCache.preloadBatch(imageUrls, [0]); // First image is priority
+    }
   }, [media]);
 
   const handleImageError = useCallback((index: number) => {
@@ -76,7 +77,7 @@ export default function PostCard({ post }: PostCardProps) {
     }
   };
 
-  // Render media item (image or video)
+  // Render media item (image or video) with optimized loading
   const renderMediaItem = (item: MediaItem, index: number, className: string = '') => {
     if (item.type === 'video') {
       return (
@@ -101,12 +102,13 @@ export default function PostCard({ post }: PostCardProps) {
     }
     
     return (
-      <img
+      <OptimizedImage
         src={item.url}
         alt=""
-        className={`w-full h-full object-cover ${className}`}
-        loading={index === 0 ? 'eager' : 'lazy'}
-        decoding="async"
+        className={className}
+        containerClassName="w-full h-full"
+        priority={index === 0}
+        objectFit="cover"
         onError={() => handleImageError(index)}
       />
     );
@@ -385,16 +387,19 @@ function MediaLightbox({ media, initialIndex, onClose, imageErrors, onImageError
 
   const hasMultiple = media.length > 1;
 
-  // Preload all images immediately when lightbox opens
+  // Preload all images immediately when lightbox opens using cache
   useEffect(() => {
-    media.forEach((item, index) => {
-      if (item.type === 'image' && item.url) {
-        const img = new Image();
-        img.onload = () => {
+    const imageUrls = media
+      .filter(item => item.type === 'image' && item.url)
+      .map(item => item.url);
+    
+    // All images high priority in lightbox
+    imageUrls.forEach((url, index) => {
+      imageCache.preload(url, 'high').then((loaded) => {
+        if (loaded) {
           setLoadedImages(prev => new Set(prev).add(index));
-        };
-        img.src = item.url;
-      }
+        }
+      });
     });
   }, [media]);
 
@@ -409,11 +414,11 @@ function MediaLightbox({ media, initialIndex, onClose, imageErrors, onImageError
     preloadIndices.forEach(idx => {
       const item = media[idx];
       if (item?.type === 'image' && item.url && !loadedImages.has(idx)) {
-        const img = new Image();
-        img.onload = () => {
-          setLoadedImages(prev => new Set(prev).add(idx));
-        };
-        img.src = item.url;
+        imageCache.preload(item.url, 'high').then((loaded) => {
+          if (loaded) {
+            setLoadedImages(prev => new Set(prev).add(idx));
+          }
+        });
       }
     });
   }, [currentIndex, media, loadedImages]);
@@ -517,29 +522,21 @@ function MediaLightbox({ media, initialIndex, onClose, imageErrors, onImageError
                 <ImageOff className="w-16 h-16" />
               </div>
             ) : (
-              <img
+              <OptimizedImage
                 src={item.url}
                 alt=""
-                className="max-w-full max-h-full object-contain"
-                style={{ 
-                  opacity: loadedImages.has(index) ? 1 : 0.5,
-                  transition: 'opacity 0.2s ease-in'
-                }}
+                containerClassName="w-full h-full flex items-center justify-center"
+                className="max-w-full max-h-full"
+                priority={true}
+                objectFit="contain"
+                showPlaceholder={true}
                 onLoad={() => setLoadedImages(prev => new Set(prev).add(index))}
                 onError={() => onImageError(index)}
-                draggable={false}
               />
             )}
           </div>
         ))}
       </div>
-
-      {/* Loading indicator for current image */}
-      {!loadedImages.has(currentIndex) && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-        </div>
-      )}
 
       {/* Navigation Arrows - Desktop */}
       {hasMultiple && (

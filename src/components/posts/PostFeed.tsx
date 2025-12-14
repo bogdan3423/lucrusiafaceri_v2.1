@@ -3,6 +3,7 @@
 /**
  * Post Feed Component
  * Displays posts with infinite scroll pagination
+ * Optimized with image preloading for instant display
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -11,6 +12,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { Post, CategoryKey } from '@/types';
 import { fetchPosts, fetchAllPosts } from '@/services/postsService';
 import PostCard from '@/components/posts/PostCard';
+import { usePreloadPostImages } from '@/components/ui/OptimizedImage';
 
 interface PostFeedProps {
   category?: CategoryKey | null;
@@ -28,6 +30,9 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
   
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  // Preload images for visible posts (first 5 posts get priority preloading)
+  usePreloadPostImages(posts.slice(0, 8));
 
   // Load initial posts (skip if userId is provided - those are passed via initialPosts)
   const loadPosts = useCallback(async () => {
