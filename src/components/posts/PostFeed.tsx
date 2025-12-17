@@ -35,22 +35,16 @@ function extractImageUrls(posts: Post[]): string[] {
   return urls;
 }
 
-// Preload images before rendering
-async function preloadPostImages(posts: Post[], priorityCount = 8): Promise<void> {
+// Preload images in background - NON-BLOCKING
+function preloadPostImagesBackground(posts: Post[], priorityCount = 4): void {
   const urls = extractImageUrls(posts);
   
-  // Preload priority images (first few posts) with high priority - more aggressive
-  const priorityUrls = urls.slice(0, priorityCount * 3); // ~3 images per post
-  const promises = priorityUrls.map(url => imageCache.preload(url, 'high'));
+  // Start preloading in background without waiting
+  const priorityUrls = urls.slice(0, priorityCount * 2);
+  priorityUrls.forEach(url => imageCache.preload(url, 'high'));
   
-  // Queue ALL remaining for background loading immediately
-  urls.slice(priorityCount * 3).forEach(url => imageCache.preload(url, 'low'));
-  
-  // Wait for priority images to load (but with timeout to not block UI)
-  await Promise.race([
-    Promise.all(promises),
-    new Promise(resolve => setTimeout(resolve, 1500)) // Max 1.5s wait
-  ]);
+  // Queue remaining for background loading
+  urls.slice(priorityCount * 2).forEach(url => imageCache.preload(url, 'low'));
 }
 
 interface PostFeedProps {
@@ -61,21 +55,20 @@ interface PostFeedProps {
 
 export default function PostFeed({ category, initialPosts = [], userId }: PostFeedProps) {
   const [posts, setPosts] = useState<Post[]>(initialPosts);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(initialPosts.length === 0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(!userId); // Disable infinite scroll for user-specific feeds
   const [error, setError] = useState<string | null>(null);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
-  const [isPreloading, setIsPreloading] = useState(false);
   
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  // Preload images when posts change - aggressive preloading
+  // Preload images when posts change - non-blocking background preload
   useEffect(() => {
     if (posts.length > 0) {
-      // Preload first 12 posts with high priority, rest in background
-      preloadPostImages(posts.slice(0, 16), 8);
+      // Start preloading in background, don't wait
+      preloadPostImagesBackground(posts.slice(0, 8), 4);
     }
   }, [posts]);
 
@@ -87,7 +80,6 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
     }
     
     setIsLoading(true);
-    setIsPreloading(true);
     setError(null); 
     
     try {
@@ -100,18 +92,18 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
         index === self.findIndex(p => p.id === post.id)
       );
       
-      // Preload images for first 4 posts before showing
-      await preloadPostImages(uniquePosts.slice(0, 4), 4);
-      
+      // Show posts immediately, preload images in background
       setPosts(uniquePosts);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
+      
+      // Start background image preloading
+      preloadPostImagesBackground(uniquePosts.slice(0, 4), 4);
     } catch (err) {
       setError('Eroare la încărcarea postărilor. Încearcă din nou.');
       console.error('Error loading posts:', err);
     } finally {
       setIsLoading(false);
-      setIsPreloading(false);
     }
   }, [category, userId]);
 

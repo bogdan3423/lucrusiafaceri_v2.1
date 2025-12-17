@@ -12,6 +12,7 @@ import { MapPin, Clock, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRi
 import { Post, MediaItem } from '@/types';
 import { formatDate, formatPrice } from '@/lib/utils';
 import OptimizedImage from '@/components/ui/OptimizedImage';
+import LazyVideo from '@/components/ui/LazyVideo';
 import { imageCache } from '@/lib/imageCache';
 
 interface PostCardProps {
@@ -82,14 +83,11 @@ export default function PostCard({ post }: PostCardProps) {
   const renderMediaItem = (item: MediaItem, index: number, className: string = '') => {
     if (item.type === 'video') {
       return (
-        <video
-          src={`${item.url}#t=0.1`}
-          className={`w-full h-full object-cover ${className}`}
-          muted
-          playsInline
-          preload={index === 0 ? 'auto' : 'metadata'}
+        <LazyVideo
+          src={item.url}
           poster={item.thumbnailUrl}
-          onClick={(e) => e.stopPropagation()}
+          className={className}
+          containerClassName="w-full h-full"
         />
       );
     }
@@ -131,13 +129,10 @@ export default function PostCard({ post }: PostCardProps) {
       if (item.type === 'video') {
         return (
           <div key={index} className={`overflow-hidden bg-gray-100 ${extraClass}`}>
-            <video
-              src={`${item.url}#t=0.1`}
-              className="w-full h-full object-cover"
-              controls
-              playsInline
-              preload={index === 0 ? 'auto' : 'metadata'}
+            <LazyVideo
+              src={item.url}
               poster={item.thumbnailUrl}
+              containerClassName="w-full h-full"
             />
           </div>
         );
@@ -158,13 +153,10 @@ export default function PostCard({ post }: PostCardProps) {
       if (item.type === 'video') {
         return (
           <div className="aspect-square sm:aspect-[4/3] overflow-hidden bg-gray-100">
-            <video
-              src={`${item.url}#t=0.1`}
-              className="w-full h-full object-cover"
-              controls
-              playsInline
-              preload="auto"
+            <LazyVideo
+              src={item.url}
               poster={item.thumbnailUrl}
+              containerClassName="w-full h-full"
             />
           </div>
         );
@@ -211,13 +203,10 @@ export default function PostCard({ post }: PostCardProps) {
             >
               {media.map((item, index) => (
                 <div key={index} className="w-full h-full flex-shrink-0">
-                  <video
-                    src={`${item.url}#t=0.1`}
-                    className="w-full h-full object-cover"
-                    controls
-                    playsInline
-                    preload={index === 0 ? 'auto' : 'metadata'}
+                  <LazyVideo
+                    src={item.url}
                     poster={item.thumbnailUrl}
+                    containerClassName="w-full h-full"
                   />
                 </div>
               ))}
@@ -292,13 +281,10 @@ export default function PostCard({ post }: PostCardProps) {
           if (item.type === 'video') {
             return (
               <div key={index} className="relative overflow-hidden bg-gray-100">
-                <video
-                  src={`${item.url}#t=0.1`}
-                  className="w-full h-full object-cover"
-                  controls
-                  playsInline
-                  preload={index === 0 ? 'auto' : 'metadata'}
+                <LazyVideo
+                  src={item.url}
                   poster={item.thumbnailUrl}
+                  containerClassName="w-full h-full"
                 />
                 {index === 3 && remainingCount > 0 && (
                   <div className="absolute inset-0 bg-black/50 flex items-center justify-center pointer-events-none">

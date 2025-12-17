@@ -28,9 +28,29 @@ import { timestampToDate, getTimestampValue } from '@/lib/utils';
 
 const POSTS_PER_PAGE = 15;
 
-// Cache for posts
-const postsCache = new Map<string, { posts: Post[]; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// Cache for posts - including 'all' feed
+const postsCache = new Map<string, { posts: Post[]; lastDoc: any; timestamp: number }>();
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes for faster updates
+
+// Clear cache on page visibility change (when user comes back to tab)
+if (typeof window !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Clear stale cache entries when user returns
+      const now = Date.now();
+      postsCache.forEach((value, key) => {
+        if (now - value.timestamp > CACHE_TTL) {
+          postsCache.delete(key);
+        }
+      });
+    }
+  });
+}
+
+// Export function to manually clear cache if needed
+export function clearPostsCache() {
+  postsCache.clear();
+}
 
 /**
  * Convert Firestore document to Post object
@@ -136,29 +156,31 @@ export async function fetchPosts(
   lastDoc?: QueryDocumentSnapshot | null
 ): Promise<{ posts: Post[]; lastDoc: QueryDocumentSnapshot | null; hasMore: boolean }> {
   try {
-    // Check cache for first page
-    if (!lastDoc && category && category !== 'all') {
-      const cached = postsCache.get(category);
+    // Check cache for first page (including 'all' feed)
+    const cacheKey = category || 'all';
+    if (!lastDoc) {
+      const cached = postsCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         return {
           posts: cached.posts,
-          lastDoc: null,
+          lastDoc: cached.lastDoc,
           hasMore: cached.posts.length >= POSTS_PER_PAGE,
         };
       }
     }
 
-    // Build query - fetch all posts without status filter (some old posts don't have status)
+    // Build query - fetch enough to ensure we have posts after filtering
+    const queryLimit = 50; // Balance between speed and having enough posts
     let postsQuery = query(
       collection(db, COLLECTIONS.PRODUCTS),
-      limit(100)
+      limit(queryLimit)
     );
 
     if (lastDoc) {
       postsQuery = query(
         collection(db, COLLECTIONS.PRODUCTS),
         startAfter(lastDoc),
-        limit(100)
+        limit(queryLimit)
       );
     }
 
@@ -198,10 +220,11 @@ export async function fetchPosts(
     const hasMore = posts.length > POSTS_PER_PAGE;
     const newLastDoc = snapshot.docs[Math.min(POSTS_PER_PAGE - 1, snapshot.docs.length - 1)] || null;
 
-    // Cache first page
-    if (!lastDoc && category) {
-      postsCache.set(category, {
+    // Cache first page (including 'all' feed)
+    if (!lastDoc) {
+      postsCache.set(cacheKey, {
         posts: paginatedPosts,
+        lastDoc: newLastDoc,
         timestamp: Date.now(),
       });
     }

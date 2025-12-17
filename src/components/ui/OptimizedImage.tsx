@@ -1,11 +1,10 @@
 'use client';
 
 /**
- * Premium Image Component
- * - NO visible placeholders or loading states
- * - Images appear only when fully loaded
- * - Layout dimensions reserved to prevent shift
- * - Invisible loading - user never sees loading states
+ * Optimized Image Component
+ * - Fast loading with smooth fade-in
+ * - Shows placeholder background while loading
+ * - Images visible immediately, fade in smoothly when loaded
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react';
@@ -23,7 +22,7 @@ interface OptimizedImageProps {
   onLoad?: () => void;
   onError?: () => void;
   onClick?: () => void;
-  showPlaceholder?: boolean; // Kept for API compatibility, but ignored
+  showPlaceholder?: boolean;
 }
 
 const OptimizedImage = memo(function OptimizedImage({
@@ -38,44 +37,26 @@ const OptimizedImage = memo(function OptimizedImage({
   onError,
   onClick,
 }: OptimizedImageProps) {
-  // Check cache synchronously for instant display
-  const [isReady, setIsReady] = useState(() => imageCache.isLoaded(src));
+  const [isLoaded, setIsLoaded] = useState(() => imageCache.isLoaded(src));
   const [hasError, setHasError] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Preload and track loading state
+  // Start preloading immediately
   useEffect(() => {
-    if (!src) return;
-
-    // Already cached - show immediately
+    if (!src || hasError) return;
+    
+    // If already cached, mark as loaded
     if (imageCache.isLoaded(src)) {
-      setIsReady(true);
+      setIsLoaded(true);
       return;
     }
 
-    // Start preloading with appropriate priority
-    imageCache.preload(src, priority ? 'high' : 'low').then((loaded) => {
-      if (loaded) {
-        setIsReady(true);
-        onLoad?.();
-      }
-    });
-
-    // Observe for viewport visibility if not priority
-    if (!priority && containerRef.current) {
-      imageCache.observe(containerRef.current, src);
-    }
-
-    return () => {
-      if (containerRef.current) {
-        imageCache.unobserve(containerRef.current, src);
-      }
-    };
-  }, [src, priority, onLoad]);
+    // Start background preload
+    imageCache.preload(src, priority ? 'high' : 'low');
+  }, [src, priority, hasError]);
 
   const handleImageLoad = () => {
-    setIsReady(true);
+    setIsLoaded(true);
     onLoad?.();
   };
 
@@ -93,12 +74,11 @@ const OptimizedImage = memo(function OptimizedImage({
 
   const objectFitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
 
-  // Error state - show error icon
+  // Error state
   if (hasError) {
     return (
       <div 
-        ref={containerRef}
-        className={`flex items-center justify-center bg-gray-50 text-gray-300 ${aspectClasses[aspectRatio]} ${containerClassName}`}
+        className={`flex items-center justify-center bg-gray-100 text-gray-300 ${aspectClasses[aspectRatio]} ${containerClassName}`}
         onClick={onClick}
       >
         <ImageOff className="w-6 h-6" />
@@ -108,27 +88,29 @@ const OptimizedImage = memo(function OptimizedImage({
 
   return (
     <div 
-      ref={containerRef}
-      className={`relative overflow-hidden bg-gray-50 ${aspectClasses[aspectRatio]} ${containerClassName}`}
+      className={`relative overflow-hidden bg-gray-100 ${aspectClasses[aspectRatio]} ${containerClassName}`}
       onClick={onClick}
     >
-      {/* Image - visible only when fully loaded, no transition */}
+      {/* Image - always rendered, fades in when loaded */}
       <img
         ref={imgRef}
         src={src}
         alt={alt}
         className={`
           w-full h-full ${objectFitClass} ${className}
-          ${isReady ? 'opacity-100' : 'opacity-0'}
+          transition-opacity duration-200 ease-out
+          ${isLoaded ? 'opacity-100' : 'opacity-0'}
         `}
-        style={{ visibility: isReady ? 'visible' : 'hidden' }}
         loading={priority ? 'eager' : 'lazy'}
-        decoding={priority ? 'sync' : 'async'}
-        // @ts-ignore - fetchPriority is a valid HTML attribute
-        fetchPriority={priority ? 'high' : 'auto'}
+        decoding="async"
         onLoad={handleImageLoad}
         onError={handleImageError}
       />
+      
+      {/* Subtle loading shimmer - only shown while loading */}
+      {!isLoaded && (
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-100 via-gray-50 to-gray-100 animate-pulse" />
+      )}
     </div>
   );
 });
