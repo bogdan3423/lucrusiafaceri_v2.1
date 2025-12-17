@@ -293,9 +293,9 @@ export async function fetchUserPosts(userId: string): Promise<Post[]> {
 
     let posts = snapshot.docs.map(docToPost);
     
-    // Filter active and sort
+    // Filter active (or no status) and sort
     posts = posts
-      .filter(post => post.status === 'active')
+      .filter(post => !post.status || post.status === 'active')
       .sort((a, b) => {
         const timeA = getTimestampValue(a.createdAt);
         const timeB = getTimestampValue(b.createdAt);
