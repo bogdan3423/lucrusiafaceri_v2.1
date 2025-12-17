@@ -25,27 +25,9 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { db, storage, COLLECTIONS } from '@/lib/firebase';
 import { Post, MediaItem, CategoryKey, CreatePostData } from '@/types';
 import { timestampToDate, getTimestampValue } from '@/lib/utils';
+import { postsCache } from '@/lib/cache';
 
 const POSTS_PER_PAGE = 15;
-
-// Cache for posts - including 'all' feed
-const postsCache = new Map<string, { posts: Post[]; lastDoc: any; timestamp: number }>();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes for faster updates
-
-// Clear cache on page visibility change (when user comes back to tab)
-if (typeof window !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      // Clear stale cache entries when user returns
-      const now = Date.now();
-      postsCache.forEach((value, key) => {
-        if (now - value.timestamp > CACHE_TTL) {
-          postsCache.delete(key);
-        }
-      });
-    }
-  });
-}
 
 // Export function to manually clear cache if needed
 export function clearPostsCache() {
@@ -150,94 +132,141 @@ function docToPost(doc: QueryDocumentSnapshot | DocumentSnapshot): Post {
 
 /**
  * Fetch posts with pagination
+ * Uses stale-while-revalidate caching for instant loads
  */
 export async function fetchPosts(
   category?: CategoryKey | string | null,
   lastDoc?: QueryDocumentSnapshot | null
-): Promise<{ posts: Post[]; lastDoc: QueryDocumentSnapshot | null; hasMore: boolean }> {
+): Promise<{ posts: Post[]; lastDoc: QueryDocumentSnapshot | null; hasMore: boolean; fromCache?: boolean }> {
+  const cacheKey = String(category || 'all');
+  
   try {
-    // Check cache for first page (including 'all' feed)
-    const cacheKey = category || 'all';
+    // Check cache for first page
     if (!lastDoc) {
       const cached = postsCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      if (cached && Array.isArray(cached.posts) && cached.posts.length > 0) {
+        // Return cached data immediately
+        // If stale, the caller can trigger a background refresh
+        if (!cached.needsRefresh) {
+          return {
+            posts: cached.posts,
+            lastDoc: cached.lastDoc,
+            hasMore: cached.posts.length >= POSTS_PER_PAGE,
+            fromCache: true,
+          };
+        }
+        
+        // Return stale data but also fetch fresh in background
+        const staleResult = {
+          posts: cached.posts,
+          lastDoc: cached.lastDoc,
+          hasMore: cached.posts.length >= POSTS_PER_PAGE,
+          fromCache: true,
+        };
+        
+        // Background refresh - don't await
+        fetchPostsFromFirestore(category, null).then(freshData => {
+          if (freshData.posts && freshData.posts.length > 0) {
+            postsCache.set(cacheKey, freshData.posts, freshData.lastDoc);
+          }
+        }).catch(() => {});
+        
+        return staleResult;
+      }
+    }
+
+    // No cache or pagination - fetch from Firestore
+    const result = await fetchPostsFromFirestore(category, lastDoc);
+    
+    // Cache first page
+    if (!lastDoc && result.posts && result.posts.length > 0) {
+      postsCache.set(cacheKey, result.posts, result.lastDoc);
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    
+    // On error, try to return stale cache if available
+    if (!lastDoc) {
+      const cached = postsCache.get(cacheKey);
+      if (cached && Array.isArray(cached.posts)) {
         return {
           posts: cached.posts,
           lastDoc: cached.lastDoc,
           hasMore: cached.posts.length >= POSTS_PER_PAGE,
+          fromCache: true,
         };
       }
     }
-
-    // Build query - fetch enough to ensure we have posts after filtering
-    const queryLimit = 50; // Balance between speed and having enough posts
-    let postsQuery = query(
-      collection(db, COLLECTIONS.PRODUCTS),
-      limit(queryLimit)
-    );
-
-    if (lastDoc) {
-      postsQuery = query(
-        collection(db, COLLECTIONS.PRODUCTS),
-        startAfter(lastDoc),
-        limit(queryLimit)
-      );
-    }
-
-    const snapshot = await getDocs(postsQuery);
-    // Filter out inactive posts client-side (allow posts without status or with active status)
-    let posts = snapshot.docs
-      .filter(doc => {
-        const data = doc.data();
-        return !data.status || data.status === 'active';
-      })
-      .map(docToPost);
-
-    // Filter by category client-side
-    if (category && category !== 'all') {
-      const otherCategories: CategoryKey[] = ['auto', 'imobiliare', 'bazar', 'jobs', 'dating'];
-      
-      if (category === 'construction') {
-        // Construction: posts without category or with category 'construction'
-        posts = posts.filter(post => {
-          const cat = post.category;
-          return !cat || cat === 'construction' || !otherCategories.includes(cat);
-        });
-      } else {
-        posts = posts.filter(post => post.category === category);
-      }
-    }
-
-    // Sort by createdAt descending (newest first)
-    posts.sort((a, b) => {
-      const timeA = getTimestampValue(a.createdAt);
-      const timeB = getTimestampValue(b.createdAt);
-      return timeB - timeA;
-    });
-
-    // Paginate
-    const paginatedPosts = posts.slice(0, POSTS_PER_PAGE);
-    const hasMore = posts.length > POSTS_PER_PAGE;
-    const newLastDoc = snapshot.docs[Math.min(POSTS_PER_PAGE - 1, snapshot.docs.length - 1)] || null;
-
-    // Cache first page (including 'all' feed)
-    if (!lastDoc) {
-      postsCache.set(cacheKey, {
-        posts: paginatedPosts,
-        lastDoc: newLastDoc,
-        timestamp: Date.now(),
-      });
-    }
-
-    return {
-      posts: paginatedPosts,
-      lastDoc: newLastDoc,
-      hasMore,
-    };
-  } catch (error) {
-    console.error('Error fetching posts:', error);
+    
     throw error;
   }
+}
+
+/**
+ * Internal function to fetch posts from Firestore
+ */
+async function fetchPostsFromFirestore(
+  category?: CategoryKey | string | null,
+  lastDoc?: QueryDocumentSnapshot | null
+): Promise<{ posts: Post[]; lastDoc: QueryDocumentSnapshot | null; hasMore: boolean }> {
+  // Build query - fetch enough to ensure we have posts after filtering
+  const queryLimit = 50; // Balance between speed and having enough posts
+  let postsQuery = query(
+    collection(db, COLLECTIONS.PRODUCTS),
+    limit(queryLimit)
+  );
+
+  if (lastDoc) {
+    postsQuery = query(
+      collection(db, COLLECTIONS.PRODUCTS),
+      startAfter(lastDoc),
+      limit(queryLimit)
+    );
+  }
+
+  const snapshot = await getDocs(postsQuery);
+  // Filter out inactive posts client-side (allow posts without status or with active status)
+  let posts = snapshot.docs
+    .filter(doc => {
+      const data = doc.data();
+      return !data.status || data.status === 'active';
+    })
+    .map(docToPost);
+
+  // Filter by category client-side
+  if (category && category !== 'all') {
+    const otherCategories: CategoryKey[] = ['auto', 'imobiliare', 'bazar', 'jobs', 'dating'];
+    
+    if (category === 'construction') {
+      // Construction: posts without category or with category 'construction'
+      posts = posts.filter(post => {
+        const cat = post.category;
+        return !cat || cat === 'construction' || !otherCategories.includes(cat);
+      });
+    } else {
+      posts = posts.filter(post => post.category === category);
+    }
+  }
+
+  // Sort by createdAt descending (newest first)
+  posts.sort((a, b) => {
+    const timeA = getTimestampValue(a.createdAt);
+    const timeB = getTimestampValue(b.createdAt);
+    return timeB - timeA;
+  });
+
+  // Paginate
+  const paginatedPosts = posts.slice(0, POSTS_PER_PAGE);
+  const hasMore = posts.length > POSTS_PER_PAGE;
+  const newLastDoc = snapshot.docs[Math.min(POSTS_PER_PAGE - 1, snapshot.docs.length - 1)] || null;
+
+  return {
+    posts: paginatedPosts,
+    lastDoc: newLastDoc,
+    hasMore,
+  };
 }
 
 /**
@@ -363,9 +392,9 @@ export async function createPost(
 
     // Invalidate cache
     if (postData.category) {
-      postsCache.delete(postData.category);
+      postsCache.invalidate(postData.category);
     }
-    postsCache.delete('all');
+    postsCache.invalidate('all');
 
     return { success: true, postId: docRef.id };
   } catch (error) {

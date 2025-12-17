@@ -12,7 +12,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX, ImageOff } from 'lucide-react';
 import { MediaItem } from '@/types';
 import OptimizedImage from '@/components/ui/OptimizedImage';
-import { imageCache } from '@/lib/imageCache';
+import { imageCache } from '@/lib/cache';
 
 interface MediaCarouselProps {
   media: MediaItem[];

@@ -13,7 +13,7 @@ import { Post, MediaItem } from '@/types';
 import { formatDate, formatPrice } from '@/lib/utils';
 import OptimizedImage from '@/components/ui/OptimizedImage';
 import LazyVideo from '@/components/ui/LazyVideo';
-import { imageCache } from '@/lib/imageCache';
+import { imageCache } from '@/lib/cache';
 
 interface PostCardProps {
   post: Post;

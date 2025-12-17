@@ -45,8 +45,20 @@ export function getTimestampValue(timestamp: unknown): number {
 /**
  * Format date in Romanian locale
  */
-export function formatDate(date: Date | null): string {
-  if (!date) return '';
+export function formatDate(dateInput: Date | unknown): string {
+  // Convert input to Date if needed
+  let date: Date | null = null;
+  
+  if (dateInput instanceof Date) {
+    date = dateInput;
+  } else if (dateInput) {
+    // Try to convert from Firestore timestamp or other format
+    date = timestampToDate(dateInput);
+  }
+  
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return '';
+  }
   
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();

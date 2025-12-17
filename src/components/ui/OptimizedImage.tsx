@@ -9,7 +9,7 @@
 
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { ImageOff } from 'lucide-react';
-import { imageCache } from '@/lib/imageCache';
+import { imageCache } from '@/lib/cache';
 
 interface OptimizedImageProps {
   src: string;

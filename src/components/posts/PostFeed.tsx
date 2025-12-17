@@ -12,7 +12,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { Post, CategoryKey } from '@/types';
 import { fetchPosts, fetchAllPosts } from '@/services/postsService';
 import PostCard from '@/components/posts/PostCard';
-import { imageCache } from '@/lib/imageCache';
+import { imageCache } from '@/lib/cache';
 
 interface PostFeedProps {
   category?: CategoryKey | null;
@@ -87,8 +87,11 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
         ? await fetchPosts(category, null)
         : await fetchAllPosts(null);
       
+      // Ensure posts is an array
+      const postsArray = Array.isArray(result.posts) ? result.posts : [];
+      
       // Deduplicate posts by ID
-      const uniquePosts = result.posts.filter((post, index, self) => 
+      const uniquePosts = postsArray.filter((post, index, self) => 
         index === self.findIndex(p => p.id === post.id)
       );
       
@@ -118,10 +121,13 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
         ? await fetchPosts(category, lastDoc)
         : await fetchAllPosts(lastDoc);
       
+      // Ensure posts is an array
+      const postsArray = Array.isArray(result.posts) ? result.posts : [];
+      
       // Deduplicate posts by ID
       setPosts(prev => {
         const existingIds = new Set(prev.map(p => p.id));
-        const newPosts = result.posts.filter(p => !existingIds.has(p.id));
+        const newPosts = postsArray.filter(p => !existingIds.has(p.id));
         return [...prev, ...newPosts];
       });
       setLastDoc(result.lastDoc);
