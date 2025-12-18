@@ -116,6 +116,29 @@ const LazyVideo = memo(function LazyVideo({
     onClick?.(e);
   }, [src, onClick]);
 
+  const handlePause = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    // Don't interfere with native controls clicks
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'VIDEO') {
+      if (isPlaying) {
+        handlePause(e);
+      } else {
+        handlePlay(e);
+      }
+    }
+  }, [isPlaying, handlePlay, handlePause]);
+
   const toggleMute = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const video = videoRef.current;
@@ -136,7 +159,7 @@ const LazyVideo = memo(function LazyVideo({
     <div 
       ref={containerRef}
       className={`relative bg-black cursor-pointer overflow-hidden ${containerClassName}`}
-      onClick={!isPlaying ? handlePlay : undefined}
+      onClick={handleContainerClick}
     >
       {/* Video element - always rendered for stable layout */}
       <video
