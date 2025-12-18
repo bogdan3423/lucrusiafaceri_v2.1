@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * Lazy Video Component
- * - Shows first frame as thumbnail immediately
- * - Plays instantly when clicked
- * - Preloads video in background for instant playback
+ * Lazy Video Component - Instagram-style
+ * - Shows first frame thumbnail immediately
+ * - Instant playback when tapped
+ * - Preloads video for smooth experience
  */
 
 import React, { useState, useRef, useEffect, memo } from 'react';
@@ -29,43 +29,47 @@ const LazyVideo = memo(function LazyVideo({
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
-  const [isReady, setIsReady] = useState(false);
+  const [thumbnailReady, setThumbnailReady] = useState(false);
+  const [canPlayThrough, setCanPlayThrough] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const previewRef = useRef<HTMLVideoElement>(null);
+  const thumbnailVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Preload the video and show first frame
+  // Preload video for instant playback
   useEffect(() => {
-    const video = previewRef.current;
-    if (!video) return;
-
-    const handleLoadedData = () => {
-      setIsReady(true);
-    };
-
-    video.addEventListener('loadeddata', handleLoadedData);
+    const video = document.createElement('video');
+    video.src = src;
+    video.preload = 'auto';
+    video.muted = true;
     
-    // Force load the first frame
+    video.oncanplaythrough = () => {
+      setCanPlayThrough(true);
+    };
+    
+    // Start loading
     video.load();
-
+    
     return () => {
-      video.removeEventListener('loadeddata', handleLoadedData);
+      video.src = '';
     };
   }, [src]);
 
+  // Handle thumbnail video loaded
+  const handleThumbnailLoaded = () => {
+    const video = thumbnailVideoRef.current;
+    if (video) {
+      // Seek to 0.5 seconds to get a good frame (not black)
+      video.currentTime = 0.5;
+    }
+  };
+
+  const handleThumbnailSeeked = () => {
+    setThumbnailReady(true);
+  };
+
   const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsPlaying(true);
-    
-    // Small delay to ensure video element is mounted, then play
-    setTimeout(() => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-        videoRef.current.play().catch(() => {
-          // Autoplay might be blocked, that's ok
-        });
-      }
-    }, 50);
-    
     onClick?.(e);
   };
 
@@ -79,39 +83,61 @@ const LazyVideo = memo(function LazyVideo({
 
   const handleVideoEnd = () => {
     setIsPlaying(false);
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+    }
   };
+
+  // Pause and reset when component goes out of view
+  useEffect(() => {
+    if (isPlaying && videoRef.current) {
+      videoRef.current.play().catch(() => {});
+    }
+  }, [isPlaying]);
 
   if (!isPlaying) {
     // Show thumbnail with first frame and play button
     return (
       <div 
-        className={`relative bg-black cursor-pointer ${containerClassName}`}
+        className={`relative bg-gray-900 cursor-pointer overflow-hidden ${containerClassName}`}
         onClick={handlePlay}
       >
-        {/* Video element to capture first frame - always visible */}
+        {/* Hidden video to extract thumbnail frame */}
         <video
-          ref={previewRef}
-          src={`${src}#t=0.5`}
-          className={`w-full h-full object-cover ${className}`}
+          ref={thumbnailVideoRef}
+          src={src}
+          className={`w-full h-full object-cover ${className} ${thumbnailReady ? 'opacity-100' : 'opacity-0'}`}
           muted
           playsInline
           preload="auto"
-          poster={poster}
-          onLoadedData={() => setIsReady(true)}
+          onLoadedData={handleThumbnailLoaded}
+          onSeeked={handleThumbnailSeeked}
         />
         
-        {/* Play button overlay */}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/10 hover:bg-black/20 transition-colors">
-          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/95 flex items-center justify-center shadow-xl transform hover:scale-110 transition-transform">
+        {/* Loading placeholder */}
+        {!thumbnailReady && (
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
+            <div className="w-8 h-8 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+          </div>
+        )}
+        
+        {/* Play button overlay - always visible */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center shadow-2xl transform hover:scale-110 active:scale-95 transition-transform">
             <Play className="w-7 h-7 sm:w-8 sm:h-8 text-gray-900 ml-1" fill="currentColor" />
           </div>
         </div>
 
-        {/* Video indicator */}
-        <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded-md flex items-center gap-1">
+        {/* Video indicator badge */}
+        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-sm text-white text-xs font-medium rounded-md flex items-center gap-1">
           <Play className="w-3 h-3" fill="currentColor" />
-          <span>Video</span>
+          Video
         </div>
+        
+        {/* Preload indicator */}
+        {canPlayThrough && (
+          <div className="absolute bottom-2 right-2 w-2 h-2 bg-green-500 rounded-full" title="Ready to play" />
+        )}
       </div>
     );
   }
@@ -128,15 +154,14 @@ const LazyVideo = memo(function LazyVideo({
         autoPlay
         muted={isMuted}
         preload="auto"
-        poster={poster}
         onEnded={handleVideoEnd}
       />
       
-      {/* Mute toggle button */}
+      {/* Mute toggle for non-controls mode */}
       {!autoShowControls && (
         <button
           onClick={toggleMute}
-          className="absolute bottom-3 right-3 p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+          className="absolute bottom-3 right-3 p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
         >
           {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
         </button>
