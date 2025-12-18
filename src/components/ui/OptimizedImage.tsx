@@ -3,8 +3,8 @@
 /**
  * Optimized Image Component
  * - Fast loading with smooth fade-in
- * - Shows placeholder background while loading
- * - Images visible immediately, fade in smoothly when loaded
+ * - No visible loading states - clean premium UX
+ * - Stable layout maintained at all times
  */
 
 import React, { useState, useEffect, useRef, memo } from 'react';
@@ -106,11 +106,6 @@ const OptimizedImage = memo(function OptimizedImage({
         onLoad={handleImageLoad}
         onError={handleImageError}
       />
-      
-      {/* Subtle loading shimmer - only shown while loading */}
-      {!isLoaded && (
-        <div className="absolute inset-0 bg-gradient-to-r from-gray-100 via-gray-50 to-gray-100 animate-pulse" />
-      )}
     </div>
   );
 });

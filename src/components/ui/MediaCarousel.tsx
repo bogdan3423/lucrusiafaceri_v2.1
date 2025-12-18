@@ -4,7 +4,7 @@
  * Media Carousel - Premium loading without visible placeholders
  * - All media rendered at once, no re-renders on navigation
  * - CSS transform for smooth, instant sliding
- * - Images appear only when fully loaded
+ * - Video caching for instant playback on navigation
  * - No visible loading states
  */
 
@@ -12,7 +12,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX, ImageOff } from 'lucide-react';
 import { MediaItem } from '@/types';
 import OptimizedImage from '@/components/ui/OptimizedImage';
-import { imageCache } from '@/lib/cache';
+import { imageCache, videoCache } from '@/lib/cache';
 
 interface MediaCarouselProps {
   media: MediaItem[];
@@ -24,6 +24,17 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [mutedVideos, setMutedVideos] = useState<Set<number>>(new Set(media.map((_, i) => i)));
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
+  const [videoUrls, setVideoUrls] = useState<Map<number, string>>(() => {
+    // Initialize with cached URLs if available
+    const initial = new Map<number, string>();
+    media.forEach((item, index) => {
+      if (item.type === 'video') {
+        const cached = videoCache.getCachedUrl(item.url);
+        initial.set(index, cached || item.url);
+      }
+    });
+    return initial;
+  });
   const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
   const touchStartX = useRef<number>(0);
 
@@ -37,6 +48,24 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
       // First image is high priority, rest are queued
       imageCache.preloadBatch(imageUrls, [0]);
     }
+  }, [media]);
+
+  // Preload videos in background
+  useEffect(() => {
+    media.forEach((item, index) => {
+      if (item.type === 'video' && item.url) {
+        // Start background caching
+        videoCache.preload(item.url, index === 0 ? 'high' : 'low').then((blobUrl) => {
+          if (blobUrl) {
+            setVideoUrls(prev => {
+              const next = new Map(prev);
+              next.set(index, blobUrl);
+              return next;
+            });
+          }
+        });
+      }
+    });
   }, [media]);
 
   // Navigation with useCallback to prevent re-renders
@@ -130,12 +159,12 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
                   ref={(el) => {
                     if (el) videoRefs.current.set(index, el);
                   }}
-                  src={`${item.url}#t=0.1`}
+                  src={`${videoUrls.get(index) || item.url}#t=0.1`}
                   className="w-full h-full object-cover"
                   muted={mutedVideos.has(index)}
                   loop
                   playsInline
-                  preload="auto"
+                  preload="metadata"
                   poster={item.thumbnailUrl}
                   onPlay={() => setPlayingIndex(index)}
                   onPause={() => { if (playingIndex === index) setPlayingIndex(null); }}

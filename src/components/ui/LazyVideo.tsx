@@ -1,13 +1,16 @@
 'use client';
 
 /**
- * Lazy Video Component - Fast loading
- * - Uses preload="metadata" for instant thumbnail (only loads first few KB)
- * - Full video loads only when play is clicked
+ * Lazy Video Component - Optimized for performance
+ * - Uses blob caching for instant playback on navigation
+ * - Loads video only when near viewport or on interaction
+ * - No visible loading states - clean premium UX
+ * - Stable layout maintained at all times
  */
 
-import React, { useState, useRef, useEffect, memo } from 'react';
+import React, { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { Play, Volume2, VolumeX } from 'lucide-react';
+import { videoCache } from '@/lib/cache';
 
 interface LazyVideoProps {
   src: string;
@@ -28,80 +31,136 @@ const LazyVideo = memo(function LazyVideo({
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
-  const [metadataLoaded, setMetadataLoaded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [videoSrc, setVideoSrc] = useState<string>(() => {
+    // Check if already cached
+    const cached = videoCache.getCachedUrl(src);
+    return cached || src;
+  });
+  const [isInView, setIsInView] = useState(false);
+  
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hasStartedLoadingRef = useRef(false);
 
-  // Seek to 0.5s for thumbnail when metadata loads
-  const handleMetadataLoaded = () => {
+  // Observe visibility to start preloading when near viewport
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setIsInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px', threshold: 0 }
+    );
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  // Start caching video when in view
+  useEffect(() => {
+    if (!isInView || hasStartedLoadingRef.current) return;
+    hasStartedLoadingRef.current = true;
+
+    // Check cache first
+    const cached = videoCache.getCachedUrl(src);
+    if (cached) {
+      setVideoSrc(cached);
+      return;
+    }
+
+    // Start background caching
+    videoCache.preload(src, 'low').then((blobUrl) => {
+      if (blobUrl) {
+        setVideoSrc(blobUrl);
+      }
+    });
+  }, [src, isInView]);
+
+  // Seek to get first frame when metadata loads
+  const handleMetadataLoaded = useCallback(() => {
     const video = videoRef.current;
     if (video && video.currentTime === 0) {
-      video.currentTime = 0.1; // Small seek to get first frame
+      video.currentTime = 0.1;
     }
-  };
+  }, []);
 
-  const handleSeeked = () => {
-    setMetadataLoaded(true);
-  };
+  const handleCanPlay = useCallback(() => {
+    setIsReady(true);
+  }, []);
 
-  const handlePlay = (e: React.MouseEvent) => {
+  const handleSeeked = useCallback(() => {
+    setIsReady(true);
+  }, []);
+
+  const handlePlay = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     
     const video = videoRef.current;
     if (video) {
+      // Prioritize video loading if not cached
+      if (!videoCache.isCached(src)) {
+        videoCache.prioritize(src);
+      }
+      
       video.currentTime = 0;
       video.play().catch(() => {});
       setIsPlaying(true);
     }
     onClick?.(e);
-  };
+  }, [src, onClick]);
 
-  const toggleMute = (e: React.MouseEvent) => {
+  const toggleMute = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const video = videoRef.current;
     if (video) {
       video.muted = !isMuted;
       setIsMuted(!isMuted);
     }
-  };
+  }, [isMuted]);
 
-  const handleVideoEnd = () => {
+  const handleVideoEnd = useCallback(() => {
     setIsPlaying(false);
     if (videoRef.current) {
       videoRef.current.currentTime = 0.1;
     }
-  };
+  }, []);
 
   return (
     <div 
+      ref={containerRef}
       className={`relative bg-black cursor-pointer overflow-hidden ${containerClassName}`}
       onClick={!isPlaying ? handlePlay : undefined}
     >
-      {/* Single video element - preload only metadata for fast thumbnail */}
+      {/* Video element - always rendered for stable layout */}
       <video
         ref={videoRef}
-        src={src}
+        src={videoSrc}
         className={`w-full h-full object-cover ${className}`}
         muted={isMuted}
         playsInline
         preload="metadata"
         controls={isPlaying && autoShowControls}
+        poster={poster}
         onLoadedMetadata={handleMetadataLoaded}
+        onCanPlay={handleCanPlay}
         onSeeked={handleSeeked}
         onEnded={handleVideoEnd}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
       />
       
-      {/* Play button overlay - shown when not playing */}
+      {/* Play button overlay - always show play icon when not playing (no spinner) */}
       {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center shadow-2xl">
-            {!metadataLoaded ? (
-              <div className="w-6 h-6 border-2 border-gray-400 border-t-gray-900 rounded-full animate-spin" />
-            ) : (
-              <Play className="w-7 h-7 sm:w-8 sm:h-8 text-gray-900 ml-1" fill="currentColor" />
-            )}
+            <Play className="w-7 h-7 sm:w-8 sm:h-8 text-gray-900 ml-1" fill="currentColor" />
           </div>
         </div>
       )}

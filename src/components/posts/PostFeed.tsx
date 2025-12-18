@@ -12,7 +12,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { Post, CategoryKey } from '@/types';
 import { fetchPosts, fetchAllPosts } from '@/services/postsService';
 import PostCard from '@/components/posts/PostCard';
-import { imageCache } from '@/lib/cache';
+import { imageCache, videoCache } from '@/lib/cache';
 
 interface PostFeedProps {
   category?: CategoryKey | null;
@@ -35,16 +35,33 @@ function extractImageUrls(posts: Post[]): string[] {
   return urls;
 }
 
-// Preload images in background - NON-BLOCKING
-function preloadPostImagesBackground(posts: Post[], priorityCount = 4): void {
-  const urls = extractImageUrls(posts);
+// Extract all video URLs from posts for preloading
+function extractVideoUrls(posts: Post[]): string[] {
+  const urls: string[] = [];
+  posts.forEach(post => {
+    if (post.media?.length) {
+      post.media.forEach(m => {
+        if (m.type === 'video' && m.url) urls.push(m.url);
+      });
+    } else if (post.videos?.length) {
+      urls.push(...post.videos);
+    }
+  });
+  return urls;
+}
+
+// Preload media in background - NON-BLOCKING
+function preloadPostMediaBackground(posts: Post[], priorityCount = 4): void {
+  // Preload images
+  const imageUrls = extractImageUrls(posts);
+  const priorityImageUrls = imageUrls.slice(0, priorityCount * 2);
+  priorityImageUrls.forEach(url => imageCache.preload(url, 'high'));
+  imageUrls.slice(priorityCount * 2).forEach(url => imageCache.preload(url, 'low'));
   
-  // Start preloading in background without waiting
-  const priorityUrls = urls.slice(0, priorityCount * 2);
-  priorityUrls.forEach(url => imageCache.preload(url, 'high'));
-  
-  // Queue remaining for background loading
-  urls.slice(priorityCount * 2).forEach(url => imageCache.preload(url, 'low'));
+  // Preload first few videos in background
+  const videoUrls = extractVideoUrls(posts);
+  videoUrls.slice(0, 2).forEach(url => videoCache.preload(url, 'high'));
+  videoUrls.slice(2, 6).forEach(url => videoCache.preload(url, 'low'));
 }
 
 interface PostFeedProps {
@@ -64,11 +81,11 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  // Preload images when posts change - non-blocking background preload
+  // Preload media when posts change - non-blocking background preload
   useEffect(() => {
     if (posts.length > 0) {
       // Start preloading in background, don't wait
-      preloadPostImagesBackground(posts.slice(0, 8), 4);
+      preloadPostMediaBackground(posts.slice(0, 8), 4);
     }
   }, [posts]);
 
@@ -100,8 +117,8 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
       
-      // Start background image preloading
-      preloadPostImagesBackground(uniquePosts.slice(0, 4), 4);
+      // Start background media preloading
+      preloadPostMediaBackground(uniquePosts.slice(0, 4), 4);
     } catch (err) {
       setError('Eroare la încărcarea postărilor. Încearcă din nou.');
       console.error('Error loading posts:', err);

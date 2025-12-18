@@ -344,16 +344,250 @@ class ImageCacheService {
 
 export const imageCache = new ImageCacheService();
 
+
+// ==================== Video Cache ====================
+
+interface CachedVideo {
+  blobUrl: string;
+  originalUrl: string;
+  timestamp: number;
+  size: number;
+}
+
+class VideoCacheService {
+  private cache = new Map<string, CachedVideo>();
+  private loadPromises = new Map<string, Promise<string | null>>();
+  private preloadQueue: Array<{ url: string; priority: 'high' | 'low' }> = [];
+  private isProcessing = false;
+  private activeLoads = 0;
+  
+  private readonly MAX_CACHE_SIZE = 50 * 1024 * 1024; // 50MB max cache
+  private readonly MAX_CONCURRENT_LOADS = 2;
+  private readonly CACHE_TTL = 60 * 60 * 1000; // 1 hour
+  private currentCacheSize = 0;
+
+  /**
+   * Check if video is cached
+   */
+  isCached(url: string): boolean {
+    const cached = this.cache.get(url);
+    if (!cached) return false;
+    
+    // Check if expired
+    if (Date.now() - cached.timestamp > this.CACHE_TTL) {
+      this.removeFromCache(url);
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
+   * Get cached blob URL for video
+   */
+  getCachedUrl(url: string): string | null {
+    const cached = this.cache.get(url);
+    if (!cached) return null;
+    
+    // Update timestamp on access
+    cached.timestamp = Date.now();
+    return cached.blobUrl;
+  }
+
+  /**
+   * Preload video into cache
+   */
+  async preload(url: string, priority: 'high' | 'low' = 'low'): Promise<string | null> {
+    if (!url) return null;
+
+    // Already cached
+    if (this.isCached(url)) {
+      return this.getCachedUrl(url);
+    }
+
+    // Already loading - return existing promise
+    const existingPromise = this.loadPromises.get(url);
+    if (existingPromise) return existingPromise;
+
+    if (priority === 'high' && this.activeLoads < this.MAX_CONCURRENT_LOADS) {
+      return this.loadVideo(url);
+    } else {
+      // Add to queue
+      const existing = this.preloadQueue.findIndex(item => item.url === url);
+      if (existing === -1) {
+        if (priority === 'high') {
+          this.preloadQueue.unshift({ url, priority });
+        } else {
+          this.preloadQueue.push({ url, priority });
+        }
+      }
+      this.processQueue();
+      return null;
+    }
+  }
+
+  /**
+   * Load a single video
+   */
+  private loadVideo(url: string): Promise<string | null> {
+    const promise = new Promise<string | null>(async (resolve) => {
+      this.activeLoads++;
+      
+      try {
+        const response = await fetch(url, { 
+          mode: 'cors',
+          credentials: 'omit'
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch video');
+        }
+        
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        
+        // Ensure we have space
+        await this.ensureSpace(blob.size);
+        
+        // Cache the blob URL
+        this.cache.set(url, {
+          blobUrl,
+          originalUrl: url,
+          timestamp: Date.now(),
+          size: blob.size,
+        });
+        this.currentCacheSize += blob.size;
+        
+        resolve(blobUrl);
+      } catch (error) {
+        // On error, just return null - video will load normally
+        resolve(null);
+      } finally {
+        this.activeLoads--;
+        this.loadPromises.delete(url);
+        this.processQueue();
+      }
+    });
+
+    this.loadPromises.set(url, promise);
+    return promise;
+  }
+
+  /**
+   * Ensure cache has space for new video
+   */
+  private async ensureSpace(neededSize: number): Promise<void> {
+    while (this.currentCacheSize + neededSize > this.MAX_CACHE_SIZE && this.cache.size > 0) {
+      // Remove oldest entry
+      let oldestUrl: string | null = null;
+      let oldestTimestamp = Infinity;
+      
+      this.cache.forEach((cached, url) => {
+        if (cached.timestamp < oldestTimestamp) {
+          oldestUrl = url;
+          oldestTimestamp = cached.timestamp;
+        }
+      });
+      
+      if (oldestUrl) {
+        this.removeFromCache(oldestUrl);
+      } else {
+        break;
+      }
+    }
+  }
+
+  /**
+   * Remove video from cache
+   */
+  private removeFromCache(url: string): void {
+    const cached = this.cache.get(url);
+    if (cached) {
+      URL.revokeObjectURL(cached.blobUrl);
+      this.currentCacheSize -= cached.size;
+      this.cache.delete(url);
+    }
+  }
+
+  /**
+   * Process the preload queue
+   */
+  private processQueue(): void {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    while (this.activeLoads < this.MAX_CONCURRENT_LOADS && this.preloadQueue.length > 0) {
+      const item = this.preloadQueue.shift();
+      if (item && !this.isCached(item.url)) {
+        this.loadVideo(item.url);
+      }
+    }
+
+    this.isProcessing = false;
+  }
+
+  /**
+   * Prioritize loading a specific video
+   */
+  prioritize(url: string): void {
+    if (this.isCached(url)) return;
+    
+    // Remove from queue and add to front
+    const idx = this.preloadQueue.findIndex(item => item.url === url);
+    if (idx > -1) {
+      this.preloadQueue.splice(idx, 1);
+    }
+    
+    this.preload(url, 'high');
+  }
+
+  /**
+   * Cleanup expired entries
+   */
+  cleanup(): void {
+    const now = Date.now();
+    const toRemove: string[] = [];
+    
+    this.cache.forEach((cached, url) => {
+      if (now - cached.timestamp > this.CACHE_TTL) {
+        toRemove.push(url);
+      }
+    });
+    
+    toRemove.forEach(url => this.removeFromCache(url));
+  }
+
+  /**
+   * Clear all cache
+   */
+  clear(): void {
+    this.cache.forEach((cached) => {
+      URL.revokeObjectURL(cached.blobUrl);
+    });
+    this.cache.clear();
+    this.preloadQueue = [];
+    this.loadPromises.clear();
+    this.currentCacheSize = 0;
+  }
+}
+
+export const videoCache = new VideoCacheService();
+
+
+// ==================== Cleanup Handlers ====================
+
 // Cleanup on tab switch
 if (typeof window !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       imageCache.cleanup();
+      videoCache.cleanup();
     }
   });
   
   // Periodic cleanup every 5 minutes
   setInterval(() => {
     imageCache.cleanup();
+    videoCache.cleanup();
   }, 5 * 60 * 1000);
 }
