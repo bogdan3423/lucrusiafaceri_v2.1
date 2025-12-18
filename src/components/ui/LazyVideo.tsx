@@ -1,10 +1,9 @@
 'use client';
 
 /**
- * Lazy Video Component - Instagram-style
- * - Shows first frame thumbnail immediately
- * - Instant playback when tapped
- * - Preloads video for smooth experience
+ * Lazy Video Component - Fast loading
+ * - Uses preload="metadata" for instant thumbnail (only loads first few KB)
+ * - Full video loads only when play is clicked
  */
 
 import React, { useState, useRef, useEffect, memo } from 'react';
@@ -29,136 +28,94 @@ const LazyVideo = memo(function LazyVideo({
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
-  const [thumbnailReady, setThumbnailReady] = useState(false);
-  const [canPlayThrough, setCanPlayThrough] = useState(false);
+  const [metadataLoaded, setMetadataLoaded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const thumbnailVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Preload video for instant playback
-  useEffect(() => {
-    const video = document.createElement('video');
-    video.src = src;
-    video.preload = 'auto';
-    video.muted = true;
-    
-    video.oncanplaythrough = () => {
-      setCanPlayThrough(true);
-    };
-    
-    // Start loading
-    video.load();
-    
-    return () => {
-      video.src = '';
-    };
-  }, [src]);
-
-  // Handle thumbnail video loaded
-  const handleThumbnailLoaded = () => {
-    const video = thumbnailVideoRef.current;
-    if (video) {
-      // Seek to 0.5 seconds to get a good frame (not black)
-      video.currentTime = 0.5;
+  // Seek to 0.5s for thumbnail when metadata loads
+  const handleMetadataLoaded = () => {
+    const video = videoRef.current;
+    if (video && video.currentTime === 0) {
+      video.currentTime = 0.1; // Small seek to get first frame
     }
   };
 
-  const handleThumbnailSeeked = () => {
-    setThumbnailReady(true);
+  const handleSeeked = () => {
+    setMetadataLoaded(true);
   };
 
   const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    setIsPlaying(true);
+    
+    const video = videoRef.current;
+    if (video) {
+      video.currentTime = 0;
+      video.play().catch(() => {});
+      setIsPlaying(true);
+    }
     onClick?.(e);
   };
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsMuted(!isMuted);
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
+    const video = videoRef.current;
+    if (video) {
+      video.muted = !isMuted;
+      setIsMuted(!isMuted);
     }
   };
 
   const handleVideoEnd = () => {
     setIsPlaying(false);
     if (videoRef.current) {
-      videoRef.current.currentTime = 0;
+      videoRef.current.currentTime = 0.1;
     }
   };
 
-  // Pause and reset when component goes out of view
-  useEffect(() => {
-    if (isPlaying && videoRef.current) {
-      videoRef.current.play().catch(() => {});
-    }
-  }, [isPlaying]);
-
-  if (!isPlaying) {
-    // Show thumbnail with first frame and play button
-    return (
-      <div 
-        className={`relative bg-gray-900 cursor-pointer overflow-hidden ${containerClassName}`}
-        onClick={handlePlay}
-      >
-        {/* Hidden video to extract thumbnail frame */}
-        <video
-          ref={thumbnailVideoRef}
-          src={src}
-          className={`w-full h-full object-cover ${className} ${thumbnailReady ? 'opacity-100' : 'opacity-0'}`}
-          muted
-          playsInline
-          preload="auto"
-          onLoadedData={handleThumbnailLoaded}
-          onSeeked={handleThumbnailSeeked}
-        />
-        
-        {/* Loading placeholder */}
-        {!thumbnailReady && (
-          <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
-            <div className="w-8 h-8 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
-          </div>
-        )}
-        
-        {/* Play button overlay - always visible */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center shadow-2xl transform hover:scale-110 active:scale-95 transition-transform">
-            <Play className="w-7 h-7 sm:w-8 sm:h-8 text-gray-900 ml-1" fill="currentColor" />
-          </div>
-        </div>
-
-        {/* Video indicator badge */}
-        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-sm text-white text-xs font-medium rounded-md flex items-center gap-1">
-          <Play className="w-3 h-3" fill="currentColor" />
-          Video
-        </div>
-        
-        {/* Preload indicator */}
-        {canPlayThrough && (
-          <div className="absolute bottom-2 right-2 w-2 h-2 bg-green-500 rounded-full" title="Ready to play" />
-        )}
-      </div>
-    );
-  }
-
-  // Video is playing - show full video player
   return (
-    <div className={`relative bg-black ${containerClassName}`} onClick={(e) => e.stopPropagation()}>
+    <div 
+      className={`relative bg-black cursor-pointer overflow-hidden ${containerClassName}`}
+      onClick={!isPlaying ? handlePlay : undefined}
+    >
+      {/* Single video element - preload only metadata for fast thumbnail */}
       <video
         ref={videoRef}
         src={src}
         className={`w-full h-full object-cover ${className}`}
-        controls={autoShowControls}
-        playsInline
-        autoPlay
         muted={isMuted}
-        preload="auto"
+        playsInline
+        preload="metadata"
+        controls={isPlaying && autoShowControls}
+        onLoadedMetadata={handleMetadataLoaded}
+        onSeeked={handleSeeked}
         onEnded={handleVideoEnd}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
       />
       
+      {/* Play button overlay - shown when not playing */}
+      {!isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center shadow-2xl">
+            {!metadataLoaded ? (
+              <div className="w-6 h-6 border-2 border-gray-400 border-t-gray-900 rounded-full animate-spin" />
+            ) : (
+              <Play className="w-7 h-7 sm:w-8 sm:h-8 text-gray-900 ml-1" fill="currentColor" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Video indicator badge */}
+      {!isPlaying && (
+        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 backdrop-blur-sm text-white text-xs font-medium rounded-md flex items-center gap-1 pointer-events-none">
+          <Play className="w-3 h-3" fill="currentColor" />
+          Video
+        </div>
+      )}
+      
       {/* Mute toggle for non-controls mode */}
-      {!autoShowControls && (
+      {isPlaying && !autoShowControls && (
         <button
           onClick={toggleMute}
           className="absolute bottom-3 right-3 p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors"
