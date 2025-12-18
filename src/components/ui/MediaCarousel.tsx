@@ -142,7 +142,7 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
 
   return (
     <div 
-      className={`relative w-full ${aspectClass} bg-black rounded-lg overflow-hidden group`}
+      className={`relative w-full ${aspectClass} bg-gray-100 rounded-lg overflow-hidden group`}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >

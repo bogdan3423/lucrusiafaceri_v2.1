@@ -158,13 +158,13 @@ const LazyVideo = memo(function LazyVideo({
   return (
     <div 
       ref={containerRef}
-      className={`relative bg-black cursor-pointer overflow-hidden ${containerClassName}`}
+      className={`relative cursor-pointer overflow-hidden ${containerClassName}`}
       onClick={handleContainerClick}
     >
-      {/* Video element - always rendered for stable layout */}
+      {/* Video element - always rendered for stable layout, shows first frame */}
       <video
         ref={videoRef}
-        src={videoSrc}
+        src={`${videoSrc}#t=0.1`}
         className={`w-full h-full object-cover ${className}`}
         muted={isMuted}
         playsInline
