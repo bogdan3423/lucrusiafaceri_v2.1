@@ -2,13 +2,13 @@
 
 /**
  * Lazy Video Component
- * - Shows placeholder/thumbnail instantly
- * - Only loads video when user clicks play
- * - Minimal network usage until interaction
+ * - Shows first frame as thumbnail immediately
+ * - Plays instantly when clicked
+ * - Preloads video in background for instant playback
  */
 
-import React, { useState, useRef, memo } from 'react';
-import { Play } from 'lucide-react';
+import React, { useState, useRef, useEffect, memo } from 'react';
+import { Play, Volume2, VolumeX } from 'lucide-react';
 
 interface LazyVideoProps {
   src: string;
@@ -27,75 +27,119 @@ const LazyVideo = memo(function LazyVideo({
   autoShowControls = true,
   onClick,
 }: LazyVideoProps) {
-  const [isActivated, setIsActivated] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const [isReady, setIsReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewRef = useRef<HTMLVideoElement>(null);
 
-  const handleActivate = (e: React.MouseEvent) => {
+  // Preload the video and show first frame
+  useEffect(() => {
+    const video = previewRef.current;
+    if (!video) return;
+
+    const handleLoadedData = () => {
+      setIsReady(true);
+    };
+
+    video.addEventListener('loadeddata', handleLoadedData);
+    
+    // Force load the first frame
+    video.load();
+
+    return () => {
+      video.removeEventListener('loadeddata', handleLoadedData);
+    };
+  }, [src]);
+
+  const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isActivated) {
-      setIsActivated(true);
-      setIsLoading(true);
-    }
+    setIsPlaying(true);
+    
+    // Small delay to ensure video element is mounted, then play
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play().catch(() => {
+          // Autoplay might be blocked, that's ok
+        });
+      }
+    }, 50);
+    
     onClick?.(e);
   };
 
-  const handleCanPlay = () => {
-    setIsLoading(false);
-    // Auto-play when ready
-    videoRef.current?.play();
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsMuted(!isMuted);
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted;
+    }
   };
 
-  // Generate a simple poster from video URL if none provided
-  const videoPoster = poster || undefined;
+  const handleVideoEnd = () => {
+    setIsPlaying(false);
+  };
 
-  if (!isActivated) {
-    // Show thumbnail with play button overlay
+  if (!isPlaying) {
+    // Show thumbnail with first frame and play button
     return (
       <div 
-        className={`relative bg-gray-900 cursor-pointer ${containerClassName}`}
-        onClick={handleActivate}
+        className={`relative bg-black cursor-pointer ${containerClassName}`}
+        onClick={handlePlay}
       >
-        {/* Video thumbnail - use first frame */}
+        {/* Video element to capture first frame - always visible */}
         <video
-          src={`${src}#t=0.1`}
+          ref={previewRef}
+          src={`${src}#t=0.5`}
           className={`w-full h-full object-cover ${className}`}
           muted
           playsInline
-          preload="metadata"
-          poster={videoPoster}
+          preload="auto"
+          poster={poster}
+          onLoadedData={() => setIsReady(true)}
         />
         
         {/* Play button overlay */}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors">
-          <div className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center shadow-lg transform hover:scale-105 transition-transform">
-            <Play className="w-8 h-8 text-gray-900 ml-1" fill="currentColor" />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/10 hover:bg-black/20 transition-colors">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/95 flex items-center justify-center shadow-xl transform hover:scale-110 transition-transform">
+            <Play className="w-7 h-7 sm:w-8 sm:h-8 text-gray-900 ml-1" fill="currentColor" />
           </div>
+        </div>
+
+        {/* Video indicator */}
+        <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded-md flex items-center gap-1">
+          <Play className="w-3 h-3" fill="currentColor" />
+          <span>Video</span>
         </div>
       </div>
     );
   }
 
-  // Video is activated - show full video player
+  // Video is playing - show full video player
   return (
-    <div className={`relative bg-gray-900 ${containerClassName}`}>
+    <div className={`relative bg-black ${containerClassName}`} onClick={(e) => e.stopPropagation()}>
       <video
         ref={videoRef}
         src={src}
         className={`w-full h-full object-cover ${className}`}
         controls={autoShowControls}
         playsInline
+        autoPlay
+        muted={isMuted}
         preload="auto"
-        poster={videoPoster}
-        onCanPlay={handleCanPlay}
-        onClick={(e) => e.stopPropagation()}
+        poster={poster}
+        onEnded={handleVideoEnd}
       />
       
-      {/* Loading spinner */}
-      {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-          <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-        </div>
+      {/* Mute toggle button */}
+      {!autoShowControls && (
+        <button
+          onClick={toggleMute}
+          className="absolute bottom-3 right-3 p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+        >
+          {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+        </button>
       )}
     </div>
   );

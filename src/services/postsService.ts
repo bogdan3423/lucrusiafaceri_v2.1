@@ -348,27 +348,50 @@ export async function createPost(
   userEmail: string,
   userName: string,
   userImage: string,
-  mediaFiles: File[]
+  mediaFiles: File[],
+  onProgress?: (progress: number) => void
 ): Promise<{ success: boolean; postId?: string; error?: string }> {
   try {
-    // Upload media files
-    const images: string[] = [];
-    const videos: string[] = [];
-
-    for (const file of mediaFiles) {
+    // Upload media files in parallel for faster uploads
+    const totalFiles = mediaFiles.length;
+    let completedFiles = 0;
+    
+    const uploadPromises = mediaFiles.map(async (file) => {
       const isVideo = file.type.startsWith('video/');
       const folder = isVideo ? 'videos' : 'images';
-      const fileName = `${folder}/${userId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
+      const fileName = `${folder}/${userId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`;
       const storageRef = ref(storage, fileName);
       
+      // Upload file
       await uploadBytes(storageRef, file);
       const downloadUrl = await getDownloadURL(storageRef);
       
-      if (isVideo) {
-        videos.push(downloadUrl);
-      } else {
-        images.push(downloadUrl);
+      // Update progress
+      completedFiles++;
+      if (onProgress) {
+        onProgress(Math.round((completedFiles / totalFiles) * 90)); // 90% for uploads
       }
+      
+      return { url: downloadUrl, isVideo };
+    });
+
+    // Wait for all uploads to complete
+    const uploadResults = await Promise.all(uploadPromises);
+    
+    const images: string[] = [];
+    const videos: string[] = [];
+    
+    uploadResults.forEach(result => {
+      if (result.isVideo) {
+        videos.push(result.url);
+      } else {
+        images.push(result.url);
+      }
+    });
+
+    if (onProgress) {
+      onProgress(95); // 95% after uploads
     }
 
     // Create post document

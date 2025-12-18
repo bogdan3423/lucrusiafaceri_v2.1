@@ -39,6 +39,7 @@ export default function CreatePostForm() {
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const handleInputChange = (
@@ -57,6 +58,17 @@ export default function CreatePostForm() {
 
     // Limit to 10 files
     const newFiles = files.slice(0, 10 - mediaFiles.length);
+    
+    // Check for large video files (warn if > 50MB)
+    const largeVideos = newFiles.filter(f => 
+      f.type.startsWith('video/') && f.size > 50 * 1024 * 1024
+    );
+    if (largeVideos.length > 0) {
+      const sizeMB = Math.round(largeVideos[0].size / (1024 * 1024));
+      setError(`Video-ul (${sizeMB}MB) este mare și va dura mai mult să se încarce. Recomandăm video-uri sub 50MB.`);
+      // Still allow upload, just warn
+      setTimeout(() => setError(null), 5000);
+    }
     
     setMediaFiles(prev => [...prev, ...newFiles]);
 
@@ -89,6 +101,7 @@ export default function CreatePostForm() {
     }
 
     setIsSubmitting(true);
+    setUploadProgress(0);
     setError(null);
 
     try {
@@ -98,10 +111,12 @@ export default function CreatePostForm() {
         user.email,
         user.fullName || user.email,
         user.profileImage || '',
-        mediaFiles
+        mediaFiles,
+        (progress) => setUploadProgress(progress)
       );
 
       if (result.success) {
+        setUploadProgress(100);
         router.push('/');
       } else {
         setError(result.error || 'Eroare la crearea postării.');
@@ -116,6 +131,25 @@ export default function CreatePostForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Upload progress */}
+      {isSubmitting && uploadProgress > 0 && (
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-blue-700">
+              {uploadProgress < 90 ? 'Se încarcă fișierele...' : 
+               uploadProgress < 100 ? 'Se creează postarea...' : 'Finalizat!'}
+            </span>
+            <span className="text-sm text-blue-600">{uploadProgress}%</span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2">
+            <div 
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Error message */}
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
@@ -165,30 +199,40 @@ export default function CreatePostForm() {
         {/* Previews */}
         {mediaPreviews.length > 0 && (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mb-4">
-            {mediaPreviews.map((preview, index) => (
-              <div key={index} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
-                {mediaFiles[index]?.type.startsWith('video/') ? (
-                  <video
-                    src={preview}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <Image
-                    src={preview}
-                    alt={`Preview ${index + 1}`}
-                    fill
-                    className="object-cover"
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={() => removeMedia(index)}
-                  className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+            {mediaPreviews.map((preview, index) => {
+              const file = mediaFiles[index];
+              const isVideo = file?.type.startsWith('video/');
+              const sizeMB = file ? (file.size / (1024 * 1024)).toFixed(1) : '0';
+              
+              return (
+                <div key={index} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
+                  {isVideo ? (
+                    <video
+                      src={preview}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Image
+                      src={preview}
+                      alt={`Preview ${index + 1}`}
+                      fill
+                      className="object-cover"
+                    />
+                  )}
+                  {/* File size badge */}
+                  <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/60 text-white text-xs rounded">
+                    {isVideo ? '🎥' : '📷'} {sizeMB}MB
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeMedia(index)}
+                    className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
