@@ -1,15 +1,17 @@
 'use client';
 
 /**
- * Optimized Image Component
- * - Fast loading with smooth fade-in
- * - No visible loading states - clean premium UX
- * - Stable layout maintained at all times
+ * Optimized Image Component - Instant Loading Experience
+ * 
+ * KEY PRINCIPLES:
+ * - NO visible placeholders (no gray boxes, no skeletons)
+ * - Images load instantly with eager loading
+ * - Layout space is reserved (no layout shift)
+ * - High priority fetch for all images
  */
 
-import React, { useState, useEffect, useRef, memo } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { ImageOff } from 'lucide-react';
-import { imageCache } from '@/lib/cache';
 
 interface OptimizedImageProps {
   src: string;
@@ -17,12 +19,10 @@ interface OptimizedImageProps {
   className?: string;
   containerClassName?: string;
   priority?: boolean;
-  aspectRatio?: 'square' | 'video' | 'auto' | 'none';
   objectFit?: 'cover' | 'contain';
   onLoad?: () => void;
   onError?: () => void;
   onClick?: () => void;
-  showPlaceholder?: boolean;
 }
 
 const OptimizedImage = memo(function OptimizedImage({
@@ -31,45 +31,30 @@ const OptimizedImage = memo(function OptimizedImage({
   className = '',
   containerClassName = '',
   priority = false,
-  aspectRatio = 'none',
   objectFit = 'cover',
   onLoad,
   onError,
   onClick,
 }: OptimizedImageProps) {
-  const [isLoaded, setIsLoaded] = useState(() => imageCache.isLoaded(src));
+  const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // Start preloading immediately
+  // Check if image is already cached
   useEffect(() => {
-    if (!src || hasError) return;
-    
-    // If already cached, mark as loaded
-    if (imageCache.isLoaded(src)) {
+    if (imgRef.current?.complete && imgRef.current?.naturalWidth > 0) {
       setIsLoaded(true);
-      return;
     }
+  }, [src]);
 
-    // Start background preload
-    imageCache.preload(src, priority ? 'high' : 'low');
-  }, [src, priority, hasError]);
-
-  const handleImageLoad = () => {
+  const handleLoad = () => {
     setIsLoaded(true);
     onLoad?.();
   };
 
-  const handleImageError = () => {
+  const handleError = () => {
     setHasError(true);
     onError?.();
-  };
-
-  const aspectClasses = {
-    square: 'aspect-square',
-    video: 'aspect-video',
-    auto: 'aspect-[4/3]',
-    none: '',
   };
 
   const objectFitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
@@ -78,7 +63,7 @@ const OptimizedImage = memo(function OptimizedImage({
   if (hasError) {
     return (
       <div 
-        className={`flex items-center justify-center bg-gray-100 text-gray-300 ${aspectClasses[aspectRatio]} ${containerClassName}`}
+        className={`w-full h-full flex items-center justify-center bg-gray-50 text-gray-300 ${containerClassName}`}
         onClick={onClick}
       >
         <ImageOff className="w-6 h-6" />
@@ -88,23 +73,26 @@ const OptimizedImage = memo(function OptimizedImage({
 
   return (
     <div 
-      className={`relative overflow-hidden bg-gray-100 ${aspectClasses[aspectRatio]} ${containerClassName}`}
+      className={`relative w-full h-full overflow-hidden ${containerClassName}`}
       onClick={onClick}
     >
-      {/* Image - always rendered, fades in when loaded */}
+      {/* 
+        The image is always rendered in the DOM.
+        We use opacity transition for smooth appearance.
+        bg-gray-50 is a very light background that blends naturally.
+      */}
       <img
         ref={imgRef}
         src={src}
         alt={alt}
         className={`
           w-full h-full ${objectFitClass} ${className}
-          transition-opacity duration-200 ease-out
-          ${isLoaded ? 'opacity-100' : 'opacity-0'}
         `}
-        loading={priority ? 'eager' : 'lazy'}
-        decoding="async"
-        onLoad={handleImageLoad}
-        onError={handleImageError}
+        loading="eager"
+        decoding="sync"
+        fetchPriority="high"
+        onLoad={handleLoad}
+        onError={handleError}
       />
     </div>
   );

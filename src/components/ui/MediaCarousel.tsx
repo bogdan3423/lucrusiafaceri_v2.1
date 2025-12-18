@@ -1,135 +1,82 @@
 'use client';
 
 /**
- * Media Carousel - Premium loading without visible placeholders
- * - All media rendered at once, no re-renders on navigation
- * - CSS transform for smooth, instant sliding
- * - Video caching for instant playback on navigation
+ * Media Carousel Component - Premium Swipeable Gallery
+ * 
+ * KEY PRINCIPLES:
+ * - All media rendered at once (no lazy rendering per slide)
+ * - Smooth CSS transform-based sliding
+ * - Videos show first frame immediately
  * - No visible loading states
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX, ImageOff } from 'lucide-react';
+import React, { useState, useRef, useCallback, memo } from 'react';
+import { ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
 import { MediaItem } from '@/types';
 import OptimizedImage from '@/components/ui/OptimizedImage';
-import { imageCache, videoCache } from '@/lib/cache';
+import LazyVideo from '@/components/ui/LazyVideo';
 
 interface MediaCarouselProps {
   media: MediaItem[];
   aspectRatio?: 'square' | 'video' | 'auto';
 }
 
-export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCarouselProps) {
+const MediaCarousel = memo(function MediaCarousel({ 
+  media, 
+  aspectRatio = 'auto' 
+}: MediaCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
-  const [mutedVideos, setMutedVideos] = useState<Set<number>>(new Set(media.map((_, i) => i)));
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
-  const [videoUrls, setVideoUrls] = useState<Map<number, string>>(() => {
-    // Initialize with cached URLs if available
-    const initial = new Map<number, string>();
-    media.forEach((item, index) => {
-      if (item.type === 'video') {
-        const cached = videoCache.getCachedUrl(item.url);
-        initial.set(index, cached || item.url);
-      }
-    });
-    return initial;
-  });
-  const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
   const touchStartX = useRef<number>(0);
-
-  // Preload ALL images immediately with caching
-  useEffect(() => {
-    const imageUrls = media
-      .filter(item => item.type === 'image' && item.url)
-      .map(item => item.url);
-    
-    if (imageUrls.length > 0) {
-      // First image is high priority, rest are queued
-      imageCache.preloadBatch(imageUrls, [0]);
-    }
-  }, [media]);
-
-  // Preload videos in background
-  useEffect(() => {
-    media.forEach((item, index) => {
-      if (item.type === 'video' && item.url) {
-        // Start background caching
-        videoCache.preload(item.url, index === 0 ? 'high' : 'low').then((blobUrl) => {
-          if (blobUrl) {
-            setVideoUrls(prev => {
-              const next = new Map(prev);
-              next.set(index, blobUrl);
-              return next;
-            });
-          }
-        });
-      }
-    });
-  }, [media]);
-
-  // Navigation with useCallback to prevent re-renders
-  const goToNext = useCallback(() => {
-    setCurrentIndex((prev) => (prev + 1) % media.length);
-  }, [media.length]);
-
-  const goToPrevious = useCallback(() => {
-    setCurrentIndex((prev) => (prev - 1 + media.length) % media.length);
-  }, [media.length]);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    const diff = touchStartX.current - e.changedTouches[0].clientX;
-    if (Math.abs(diff) > 50) {
-      diff > 0 ? goToNext() : goToPrevious();
-    }
-  };
-
-  const togglePlayPause = useCallback((index: number) => {
-    const video = videoRefs.current.get(index);
-    if (video) {
-      if (playingIndex === index) {
-        video.pause();
-        setPlayingIndex(null);
-      } else {
-        // Pause any currently playing video
-        if (playingIndex !== null) {
-          videoRefs.current.get(playingIndex)?.pause();
-        }
-        video.play();
-        setPlayingIndex(index);
-      }
-    }
-  }, [playingIndex]);
-
-  const toggleMute = useCallback((index: number) => {
-    const video = videoRefs.current.get(index);
-    if (video) {
-      const newMuted = !mutedVideos.has(index);
-      video.muted = newMuted;
-      setMutedVideos(prev => {
-        const next = new Set(prev);
-        if (newMuted) {
-          next.add(index);
-        } else {
-          next.delete(index);
-        }
-        return next;
-      });
-    }
-  }, [mutedVideos]);
+  const touchDeltaX = useRef<number>(0);
+  const isDragging = useRef(false);
+  const [dragOffset, setDragOffset] = useState(0);
 
   const handleImageError = useCallback((index: number) => {
     setImageErrors(prev => new Set(prev).add(index));
   }, []);
 
+  const goToNext = useCallback(() => {
+    setCurrentIndex(prev => (prev + 1) % media.length);
+    setDragOffset(0);
+  }, [media.length]);
+
+  const goToPrevious = useCallback(() => {
+    setCurrentIndex(prev => (prev - 1 + media.length) % media.length);
+    setDragOffset(0);
+  }, [media.length]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchDeltaX.current = 0;
+    isDragging.current = true;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging.current || media.length <= 1) return;
+    touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+    setDragOffset(touchDeltaX.current);
+  };
+
+  const handleTouchEnd = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    
+    const threshold = 50;
+    if (touchDeltaX.current > threshold && currentIndex > 0) {
+      goToPrevious();
+    } else if (touchDeltaX.current < -threshold && currentIndex < media.length - 1) {
+      goToNext();
+    } else {
+      setDragOffset(0);
+    }
+  };
+
+  // Empty state
   if (!media || media.length === 0) {
     return (
-      <div className="w-full aspect-video bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center rounded-lg">
-        <div className="text-center text-gray-400">
+      <div className="w-full aspect-[4/3] bg-gray-50 flex items-center justify-center rounded-lg">
+        <div className="text-center text-gray-300">
           <ImageOff className="w-12 h-12 mx-auto mb-2" />
           <span className="text-sm">Fără imagine</span>
         </div>
@@ -138,67 +85,42 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
   }
 
   const hasMultiple = media.length > 1;
-  const aspectClass = aspectRatio === 'square' ? 'aspect-square' : aspectRatio === 'video' ? 'aspect-video' : 'aspect-[4/3]';
+  const aspectClass = 
+    aspectRatio === 'square' ? 'aspect-square' : 
+    aspectRatio === 'video' ? 'aspect-video' : 
+    'aspect-[4/3]';
 
   return (
     <div 
-      className={`relative w-full ${aspectClass} bg-gray-100 rounded-lg overflow-hidden group`}
+      className={`relative w-full ${aspectClass} overflow-hidden rounded-lg group`}
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
       {/* Carousel Track - All media rendered, CSS transform for smooth sliding */}
       <div
-        className="flex h-full transition-transform duration-300 ease-out will-change-transform"
-        style={{ transform: `translateX(-${currentIndex * 100}%)` }}
+        className="flex h-full will-change-transform"
+        style={{ 
+          transform: `translateX(calc(-${currentIndex * 100}% + ${dragOffset}px))`,
+          transition: isDragging.current ? 'none' : 'transform 0.3s ease-out',
+        }}
       >
         {media.map((item, index) => (
-          <div key={index} className="w-full h-full flex-shrink-0 relative">
+          <div key={index} className="w-full h-full flex-shrink-0">
             {item.type === 'video' ? (
-              <>
-                <video
-                  ref={(el) => {
-                    if (el) videoRefs.current.set(index, el);
-                  }}
-                  src={`${videoUrls.get(index) || item.url}#t=0.1`}
-                  className="w-full h-full object-cover"
-                  muted={mutedVideos.has(index)}
-                  loop
-                  playsInline
-                  preload="metadata"
-                  poster={item.thumbnailUrl}
-                  onPlay={() => setPlayingIndex(index)}
-                  onPause={() => { if (playingIndex === index) setPlayingIndex(null); }}
-                />
-                {/* Video controls overlay - only show for current slide */}
-                {index === currentIndex && (
-                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between z-10">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); togglePlayPause(index); }} 
-                      className="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
-                    >
-                      {playingIndex === index ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); toggleMute(index); }} 
-                      className="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
-                    >
-                      {mutedVideos.has(index) ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                    </button>
-                  </div>
-                )}
-              </>
+              <LazyVideo
+                src={item.url}
+                poster={item.thumbnailUrl}
+              />
             ) : imageErrors.has(index) ? (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100 text-gray-400">
-                <ImageOff className="w-8 h-8 mb-2" />
-                <span className="text-sm">Imagine indisponibilă</span>
+              <div className="w-full h-full flex items-center justify-center bg-gray-50 text-gray-300">
+                <ImageOff className="w-8 h-8" />
               </div>
             ) : (
               <OptimizedImage
                 src={item.url}
                 alt=""
-                containerClassName="w-full h-full"
                 priority={index === 0 || index === currentIndex}
-                objectFit="cover"
                 onError={() => handleImageError(index)}
               />
             )}
@@ -206,44 +128,53 @@ export default function MediaCarousel({ media, aspectRatio = 'auto' }: MediaCaro
         ))}
       </div>
 
-      {/* Navigation */}
+      {/* Navigation Arrows - Desktop only */}
       {hasMultiple && (
         <>
           <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); goToPrevious(); }}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white text-gray-800 rounded-full flex items-center justify-center shadow-lg z-10 opacity-0 group-hover:opacity-100 transition-opacity"
-            aria-label="Previous"
+            onClick={(e) => { e.stopPropagation(); goToPrevious(); }}
+            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-white/80 hover:bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex z-10"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-5 h-5 text-gray-800" />
           </button>
           <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); goToNext(); }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white text-gray-800 rounded-full flex items-center justify-center shadow-lg z-10 opacity-0 group-hover:opacity-100 transition-opacity"
-            aria-label="Next"
+            onClick={(e) => { e.stopPropagation(); goToNext(); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-white/80 hover:bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex z-10"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-5 h-5 text-gray-800" />
           </button>
-
-          {/* Dots */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-            {media.map((_, index) => (
-              <button
-                key={index}
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCurrentIndex(index); }}
-                className={`h-2 rounded-full transition-all duration-200 ${
-                  index === currentIndex ? 'bg-white w-5' : 'bg-white/50 w-2 hover:bg-white/75'
-                }`}
-                aria-label={`Go to slide ${index + 1}`}
-              />
-            ))}
-          </div>
-
-          {/* Counter */}
-          <div className="absolute top-3 right-3 px-2.5 py-1 bg-black/60 text-white text-xs rounded-full font-medium z-10">
-            {currentIndex + 1}/{media.length}
-          </div>
         </>
+      )}
+
+      {/* Dots Indicator */}
+      {hasMultiple && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+          {media.map((_, index) => (
+            <button
+              key={index}
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setCurrentIndex(index); 
+                setDragOffset(0); 
+              }}
+              className={`w-2 h-2 rounded-full transition-all ${
+                index === currentIndex 
+                  ? 'bg-white w-4' 
+                  : 'bg-white/60 hover:bg-white/80'
+              }`}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Slide Counter */}
+      {hasMultiple && (
+        <div className="absolute top-3 right-3 px-2 py-1 bg-black/50 backdrop-blur-sm text-white text-xs font-medium rounded-md z-10">
+          {currentIndex + 1}/{media.length}
+        </div>
       )}
     </div>
   );
-}
+});
+
+export default MediaCarousel;

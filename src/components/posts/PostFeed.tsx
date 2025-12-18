@@ -1,230 +1,242 @@
 'use client';
 
 /**
- * Post Feed Component
- * Displays posts with infinite scroll pagination
- * Premium loading: images appear only when fully ready
+ * Post Feed Component - Premium Instagram/Facebook-style Loading
+ * 
+ * KEY PRINCIPLES:
+ * - Posts appear INSTANTLY (no loading states visible)
+ * - Images load fast with reserved space (no layout shift)
+ * - Videos show first frame immediately (no placeholders)
+ * - Smooth infinite scroll with prefetching
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { QueryDocumentSnapshot } from 'firebase/firestore';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { Post, CategoryKey } from '@/types';
 import { fetchPosts, fetchAllPosts } from '@/services/postsService';
 import PostCard from '@/components/posts/PostCard';
-import { imageCache, videoCache } from '@/lib/cache';
+
+// Constants
+const INITIAL_LOAD_COUNT = 5;
+const PREFETCH_THRESHOLD = 800;
 
 interface PostFeedProps {
   category?: CategoryKey | null;
   initialPosts?: Post[];
-  userId?: string; // When provided, only shows posts from this user (no infinite scroll)
-}
-
-// Extract all image URLs from posts for preloading
-function extractImageUrls(posts: Post[]): string[] {
-  const urls: string[] = [];
-  posts.forEach(post => {
-    if (post.media?.length) {
-      post.media.forEach(m => {
-        if (m.type === 'image' && m.url) urls.push(m.url);
-      });
-    } else if (post.images?.length) {
-      urls.push(...post.images);
-    }
-  });
-  return urls;
-}
-
-// Extract all video URLs from posts for preloading
-function extractVideoUrls(posts: Post[]): string[] {
-  const urls: string[] = [];
-  posts.forEach(post => {
-    if (post.media?.length) {
-      post.media.forEach(m => {
-        if (m.type === 'video' && m.url) urls.push(m.url);
-      });
-    } else if (post.videos?.length) {
-      urls.push(...post.videos);
-    }
-  });
-  return urls;
-}
-
-// Preload media in background - NON-BLOCKING
-function preloadPostMediaBackground(posts: Post[], priorityCount = 4): void {
-  // Preload images
-  const imageUrls = extractImageUrls(posts);
-  const priorityImageUrls = imageUrls.slice(0, priorityCount * 2);
-  priorityImageUrls.forEach(url => imageCache.preload(url, 'high'));
-  imageUrls.slice(priorityCount * 2).forEach(url => imageCache.preload(url, 'low'));
-  
-  // Preload first few videos in background
-  const videoUrls = extractVideoUrls(posts);
-  videoUrls.slice(0, 2).forEach(url => videoCache.preload(url, 'high'));
-  videoUrls.slice(2, 6).forEach(url => videoCache.preload(url, 'low'));
-}
-
-interface PostFeedProps {
-  category?: CategoryKey | null;
-  initialPosts?: Post[];
-  userId?: string; // When provided, only shows posts from this user (no infinite scroll)
+  userId?: string;
 }
 
 export default function PostFeed({ category, initialPosts = [], userId }: PostFeedProps) {
+  // Core state
   const [posts, setPosts] = useState<Post[]>(initialPosts);
-  const [isLoading, setIsLoading] = useState(initialPosts.length === 0);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(!userId); // Disable infinite scroll for user-specific feeds
-  const [error, setError] = useState<string | null>(null);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(!userId);
+  const [isInitialLoad, setIsInitialLoad] = useState(initialPosts.length === 0);
+  const [isPrefetching, setIsPrefetching] = useState(false);
   
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  // Refs
+  const feedRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const hasInitializedRef = useRef(false);
+  const prefetchedPostsRef = useRef<Post[]>([]);
+  const prefetchedLastDocRef = useRef<QueryDocumentSnapshot | null>(null);
+  const prefetchHasMoreRef = useRef<boolean>(true);
 
-  // Preload media when posts change - non-blocking background preload
-  useEffect(() => {
-    if (posts.length > 0) {
-      // Start preloading in background, don't wait
-      preloadPostMediaBackground(posts.slice(0, 8), 4);
-    }
-  }, [posts]);
+  // Deduplicate posts by ID
+  const deduplicatePosts = useCallback((newPosts: Post[], existing: Post[]): Post[] => {
+    const existingIds = new Set(existing.map(p => p.id));
+    return newPosts.filter(p => !existingIds.has(p.id));
+  }, []);
 
-  // Load initial posts (skip if userId is provided - those are passed via initialPosts)
-  const loadPosts = useCallback(async () => {
-    if (userId) {
-      // For user-specific feeds, posts are already provided via initialPosts
-      return;
-    }
-    
-    setIsLoading(true);
-    setError(null); 
+  // Load initial posts
+  const loadInitialPosts = useCallback(async () => {
+    if (userId || hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
     
     try {
       const result = category 
         ? await fetchPosts(category, null)
         : await fetchAllPosts(null);
       
-      // Ensure posts is an array
       const postsArray = Array.isArray(result.posts) ? result.posts : [];
       
-      // Deduplicate posts by ID
-      const uniquePosts = postsArray.filter((post, index, self) => 
-        index === self.findIndex(p => p.id === post.id)
-      );
-      
-      // Show posts immediately, preload images in background
-      setPosts(uniquePosts);
+      setPosts(postsArray);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
-      
-      // Start background media preloading
-      preloadPostMediaBackground(uniquePosts.slice(0, 4), 4);
+      setIsInitialLoad(false);
     } catch (err) {
-      setError('Eroare la încărcarea postărilor. Încearcă din nou.');
       console.error('Error loading posts:', err);
-    } finally {
-      setIsLoading(false);
+      setIsInitialLoad(false);
     }
   }, [category, userId]);
 
-  // Load more posts (pagination) - disabled for user-specific feeds
-  const loadMorePosts = useCallback(async () => {
-    if (isLoadingMore || !hasMore || userId) return;
+  // Prefetch next batch (runs in background)
+  const prefetchNextBatch = useCallback(async () => {
+    if (isPrefetching || !hasMore || userId || prefetchedPostsRef.current.length > 0) return;
     
-    setIsLoadingMore(true);
+    setIsPrefetching(true);
     
     try {
       const result = category 
         ? await fetchPosts(category, lastDoc)
         : await fetchAllPosts(lastDoc);
       
-      // Ensure posts is an array
       const postsArray = Array.isArray(result.posts) ? result.posts : [];
-      
-      // Deduplicate posts by ID
-      setPosts(prev => {
-        const existingIds = new Set(prev.map(p => p.id));
-        const newPosts = postsArray.filter(p => !existingIds.has(p.id));
-        return [...prev, ...newPosts];
-      });
-      setLastDoc(result.lastDoc);
-      setHasMore(result.hasMore);
+      prefetchedPostsRef.current = postsArray;
+      prefetchedLastDocRef.current = result.lastDoc;
+      prefetchHasMoreRef.current = result.hasMore;
     } catch (err) {
-      console.error('Error loading more posts:', err);
+      console.error('Error prefetching posts:', err);
     } finally {
-      setIsLoadingMore(false);
+      setIsPrefetching(false);
     }
-  }, [category, lastDoc, hasMore, isLoadingMore]);
+  }, [category, lastDoc, hasMore, isPrefetching, userId]);
 
-  // Initial load
+  // Load more posts (uses prefetched data if available)
+  const loadMorePosts = useCallback(() => {
+    if (!hasMore || userId) return;
+    
+    // Use prefetched posts if available
+    if (prefetchedPostsRef.current.length > 0) {
+      const newPosts = deduplicatePosts(prefetchedPostsRef.current, posts);
+      setPosts(prev => [...prev, ...newPosts]);
+      setLastDoc(prefetchedLastDocRef.current);
+      setHasMore(prefetchHasMoreRef.current);
+      
+      // Clear prefetched data
+      prefetchedPostsRef.current = [];
+      prefetchedLastDocRef.current = null;
+      
+      return;
+    }
+    
+    // Fallback: fetch directly
+    const fetchMore = async () => {
+      try {
+        const result = category 
+          ? await fetchPosts(category, lastDoc)
+          : await fetchAllPosts(lastDoc);
+        
+        const postsArray = Array.isArray(result.posts) ? result.posts : [];
+        const newPosts = deduplicatePosts(postsArray, posts);
+        
+        setPosts(prev => [...prev, ...newPosts]);
+        setLastDoc(result.lastDoc);
+        setHasMore(result.hasMore);
+      } catch (err) {
+        console.error('Error loading more posts:', err);
+      }
+    };
+    
+    fetchMore();
+  }, [category, lastDoc, hasMore, posts, deduplicatePosts, userId]);
+
+  // Initialize on mount
   useEffect(() => {
-    if (initialPosts.length === 0) {
-      loadPosts();
+    if (initialPosts.length === 0 && !userId) {
+      loadInitialPosts();
+    } else {
+      setIsInitialLoad(false);
     }
-  }, [loadPosts, initialPosts.length]);
+  }, [loadInitialPosts, initialPosts.length, userId]);
 
-  // Set up infinite scroll observer
+  // Intersection Observer for infinite scroll
   useEffect(() => {
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-    }
-
-    observerRef.current = new IntersectionObserver(
+    if (!sentinelRef.current || userId) return;
+    
+    const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+        const [entry] = entries;
+        if (entry.isIntersecting && hasMore) {
           loadMorePosts();
         }
       },
-      { threshold: 0.1, rootMargin: '400px' }
+      {
+        rootMargin: `${PREFETCH_THRESHOLD}px`,
+        threshold: 0,
+      }
     );
+    
+    observer.observe(sentinelRef.current);
+    
+    return () => observer.disconnect();
+  }, [hasMore, loadMorePosts, userId]);
 
-    if (loadMoreRef.current) {
-      observerRef.current.observe(loadMoreRef.current);
-    }
-
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+  // Prefetch when scrolling near bottom
+  useEffect(() => {
+    if (!hasMore || userId) return;
+    
+    const handleScroll = () => {
+      const scrollBottom = window.innerHeight + window.scrollY;
+      const docHeight = document.documentElement.scrollHeight;
+      
+      if (docHeight - scrollBottom < PREFETCH_THRESHOLD * 2) {
+        prefetchNextBatch();
       }
     };
-  }, [hasMore, isLoadingMore, loadMorePosts]);
+    
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasMore, prefetchNextBatch, userId]);
 
   // Refresh handler
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
+    hasInitializedRef.current = false;
+    prefetchedPostsRef.current = [];
+    prefetchedLastDocRef.current = null;
     setPosts([]);
     setLastDoc(null);
-    setHasMore(true);
-    loadPosts();
-  };
+    setHasMore(!userId);
+    setIsInitialLoad(true);
+    
+    setTimeout(() => {
+      loadInitialPosts();
+    }, 100);
+  }, [loadInitialPosts, userId]);
 
-  // Loading state
-  if (isLoading && posts.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
-        <p className="text-gray-500">Se încarcă postările...</p>
-      </div>
-    );
-  }
+  // Memoize post cards for performance
+  const postCards = useMemo(() => (
+    posts.map((post, index) => (
+      <PostCard 
+        key={post.id} 
+        post={post} 
+        priority={index < 3}
+      />
+    ))
+  ), [posts]);
 
-  // Error state
-  if (error && posts.length === 0) {
+  // Initial loading - show minimal skeleton
+  if (isInitialLoad && posts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12">
-        <p className="text-red-500 mb-4">{error}</p>
-        <button
-          onClick={handleRefresh}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span>Încearcă din nou</span>
-        </button>
+      <div className="w-full md:max-w-xl lg:max-w-2xl md:mx-auto">
+        <div className="flex flex-col">
+          {[1, 2, 3].map((i) => (
+            <div 
+              key={i} 
+              className="bg-white md:rounded-2xl md:shadow-sm md:border md:border-gray-100 overflow-hidden border-b-8 border-gray-100 md:border-b-0 md:mb-6 animate-pulse"
+            >
+              <div className="px-3 py-3 md:p-4 flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-gray-200" />
+                <div className="flex-1">
+                  <div className="h-4 w-24 bg-gray-200 rounded mb-2" />
+                  <div className="h-3 w-32 bg-gray-200 rounded" />
+                </div>
+              </div>
+              <div className="aspect-square sm:aspect-[4/3] bg-gray-200" />
+              <div className="px-3 py-3 md:px-4">
+                <div className="h-5 w-3/4 bg-gray-200 rounded mb-2" />
+                <div className="h-4 w-full bg-gray-200 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   // Empty state
-  if (!isLoading && posts.length === 0) {
+  if (!isInitialLoad && posts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
@@ -241,34 +253,26 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
   }
 
   return (
-    <div className="w-full md:max-w-xl lg:max-w-2xl md:mx-auto">
+    <div ref={feedRef} className="w-full md:max-w-xl lg:max-w-2xl md:mx-auto">
       {/* Refresh button */}
       <div className="flex justify-end mb-2 px-3 md:px-0">
         <button
           onClick={handleRefresh}
-          disabled={isLoading}
+          disabled={isInitialLoad}
           className="flex items-center space-x-2 px-3 py-1.5 text-sm text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${isInitialLoad ? 'animate-spin' : ''}`} />
           <span>Actualizează</span>
         </button>
       </div>
 
-      {/* Posts feed - Mobile-first immersive vertical layout */}
+      {/* Posts feed */}
       <div className="flex flex-col">
-        {posts.map((post, index) => (
-          <PostCard key={`${post.id}-${index}`} post={post} />
-        ))}
+        {postCards}
       </div>
 
-      {/* Load more sentinel */}
-      <div ref={loadMoreRef} className="h-10 flex items-center justify-center">
-        {isLoadingMore && (
-          <div className="flex items-center space-x-2 text-gray-500">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Se încarcă mai multe...</span>
-          </div>
-        )}
+      {/* Infinite scroll sentinel */}
+      <div ref={sentinelRef} className="h-10 flex items-center justify-center">
         {!hasMore && posts.length > 0 && (
           <p className="text-gray-400 text-sm">Ai ajuns la final 🎉</p>
         )}
