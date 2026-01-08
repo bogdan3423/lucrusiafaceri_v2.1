@@ -12,11 +12,13 @@
 
 import React, { useState, useCallback, useMemo, memo } from 'react';
 import Link from 'next/link';
-import { MapPin, Clock, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRight, X, Play } from 'lucide-react';
-import { Post, MediaItem } from '@/types';
+import { MapPin, Clock, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRight, X, Play, Heart, MessageCircle, Send, Trash2 } from 'lucide-react';
+import { Post, MediaItem, Comment } from '@/types';
 import { formatDate, formatPrice } from '@/lib/utils';
 import OptimizedImage from '@/components/ui/OptimizedImage';
 import LazyVideo from '@/components/ui/LazyVideo';
+import { useAuth } from '@/contexts/AuthContext';
+import { likePost, unlikePost, addComment, getComments, deleteComment } from '@/services/postsService';
 
 interface PostCardProps {
   post: Post;
@@ -24,10 +26,30 @@ interface PostCardProps {
 }
 
 const PostCard = memo(function PostCard({ post, priority = false }: PostCardProps) {
+  const { user } = useAuth();
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  
+  // Like state
+  const [isLiked, setIsLiked] = useState(post.likes?.includes(user?.uid || '') || false);
+  const [likesCount, setLikesCount] = useState(post.likesCount || post.likes?.length || 0);
+  const [isLiking, setIsLiking] = useState(false);
+  
+  // Comment state
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [commentsCount, setCommentsCount] = useState(post.commentsCount || 0);
+  
+  // Share state
+  const [showCopied, setShowCopied] = useState(false);
+  
+  // Deleting comment state
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
   // Build media array from post data
   const media: MediaItem[] = useMemo(() => {
@@ -72,6 +94,126 @@ const PostCard = memo(function PostCard({ post, priority = false }: PostCardProp
       }
     }
   }, [imageMedia, openLightbox]);
+
+  // Handle like/unlike
+  const handleLike = useCallback(async () => {
+    if (!user) return; // User must be logged in
+    if (isLiking) return;
+    
+    setIsLiking(true);
+    const wasLiked = isLiked;
+    
+    // Optimistic update
+    setIsLiked(!wasLiked);
+    setLikesCount(prev => wasLiked ? prev - 1 : prev + 1);
+    
+    try {
+      const result = wasLiked 
+        ? await unlikePost(post.id, user.uid)
+        : await likePost(post.id, user.uid);
+      
+      if (!result.success) {
+        // Revert on error
+        setIsLiked(wasLiked);
+        setLikesCount(prev => wasLiked ? prev + 1 : prev - 1);
+      }
+    } catch {
+      // Revert on error
+      setIsLiked(wasLiked);
+      setLikesCount(prev => wasLiked ? prev + 1 : prev - 1);
+    } finally {
+      setIsLiking(false);
+    }
+  }, [user, isLiked, isLiking, post.id]);
+
+  // Load comments
+  const loadComments = useCallback(async () => {
+    if (isLoadingComments) return;
+    setIsLoadingComments(true);
+    try {
+      const fetchedComments = await getComments(post.id);
+      setComments(fetchedComments);
+    } catch (error) {
+      console.error('Error loading comments:', error);
+    } finally {
+      setIsLoadingComments(false);
+    }
+  }, [post.id, isLoadingComments]);
+
+  // Toggle comments section
+  const handleToggleComments = useCallback(() => {
+    const newShowComments = !showComments;
+    setShowComments(newShowComments);
+    if (newShowComments && comments.length === 0) {
+      loadComments();
+    }
+  }, [showComments, comments.length, loadComments]);
+
+  // Submit comment
+  const handleSubmitComment = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !newComment.trim() || isSubmittingComment) return;
+    
+    setIsSubmittingComment(true);
+    try {
+      const result = await addComment(
+        post.id,
+        user.uid,
+        user.fullName || 'Anonim',
+        user.profileImage,
+        newComment.trim()
+      );
+      
+      if (result.success && result.comment) {
+        setComments(prev => [result.comment!, ...prev]);
+        setCommentsCount(prev => prev + 1);
+        setNewComment('');
+      }
+    } catch (error) {
+      console.error('Error submitting comment:', error);
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  }, [user, newComment, isSubmittingComment, post.id]);
+
+  // Handle share
+  const handleShare = useCallback(async () => {
+    const postUrl = `${window.location.origin}/postare/${post.id}`;
+    
+    try {
+      await navigator.clipboard.writeText(postUrl);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = postUrl;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    }
+  }, [post.id]);
+
+  // Handle delete comment
+  const handleDeleteComment = useCallback(async (commentId: string) => {
+    if (!user || deletingCommentId) return;
+    
+    setDeletingCommentId(commentId);
+    try {
+      const result = await deleteComment(post.id, commentId);
+      if (result.success) {
+        setComments(prev => prev.filter(c => c.id !== commentId));
+        setCommentsCount(prev => Math.max(0, prev - 1));
+      }
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+    } finally {
+      setDeletingCommentId(null);
+    }
+  }, [user, deletingCommentId, post.id]);
 
   // Render media item
   const renderMediaItem = useCallback((item: MediaItem, index: number) => {
@@ -313,13 +455,146 @@ const PostCard = memo(function PostCard({ post, priority = false }: PostCardProp
         </div>
 
         {/* Actions */}
-        <div className="px-3 py-3 md:px-4 flex items-center justify-between">
+        <div className="px-3 py-3 md:px-4 flex items-center justify-between border-t border-gray-100">
           <div className="flex items-center gap-4">
-            <button className="text-gray-600 hover:text-green-500">
-              <Share2 className="w-6 h-6" />
+            {/* Like Button */}
+            <button 
+              onClick={handleLike}
+              disabled={!user || isLiking}
+              className={`flex items-center gap-1.5 transition-colors ${
+                !user ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-500'
+              } ${isLiked ? 'text-red-500' : 'text-gray-600'}`}
+              title={!user ? 'Conectează-te pentru a aprecia' : isLiked ? 'Elimină aprecierea' : 'Apreciază'}
+            >
+              <Heart className={`w-6 h-6 ${isLiked ? 'fill-current' : ''}`} />
+              {likesCount > 0 && (
+                <span className="text-sm font-medium">{likesCount}</span>
+              )}
             </button>
+            
+            {/* Comment Button */}
+            <button 
+              onClick={handleToggleComments}
+              className="flex items-center gap-1.5 text-gray-600 hover:text-blue-500 transition-colors"
+            >
+              <MessageCircle className="w-6 h-6" />
+              {commentsCount > 0 && (
+                <span className="text-sm font-medium">{commentsCount}</span>
+              )}
+            </button>
+            
+            {/* Share Button */}
+            <div className="relative">
+              <button 
+                onClick={handleShare}
+                className="text-gray-600 hover:text-green-500 transition-colors"
+                title="Copiază linkul"
+              >
+                <Share2 className="w-6 h-6" />
+              </button>
+              {showCopied && (
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                  Link copiat!
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Comments Section */}
+        {showComments && (
+          <div className="px-3 pb-3 md:px-4 border-t border-gray-100">
+            {/* Comment Input */}
+            {user ? (
+              <form onSubmit={handleSubmitComment} className="flex items-center gap-2 py-3">
+                <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                  {user.profileImage ? (
+                    <img src={user.profileImage} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-blue-500 flex items-center justify-center">
+                      <span className="text-white text-sm font-bold">{user.fullName?.charAt(0) || 'U'}</span>
+                    </div>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Adaugă un comentariu..."
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-full text-sm focus:outline-none focus:border-blue-400"
+                />
+                <button
+                  type="submit"
+                  disabled={!newComment.trim() || isSubmittingComment}
+                  className={`p-2 rounded-full transition-colors ${
+                    newComment.trim() && !isSubmittingComment
+                      ? 'text-blue-500 hover:bg-blue-50'
+                      : 'text-gray-300 cursor-not-allowed'
+                  }`}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </form>
+            ) : (
+              <div className="py-3 text-center text-sm text-gray-500">
+                <Link href="/autentificare" className="text-blue-500 hover:underline">
+                  Conectează-te
+                </Link>
+                {' '}pentru a comenta
+              </div>
+            )}
+
+            {/* Comments List */}
+            {isLoadingComments ? (
+              <div className="py-4 text-center text-gray-500 text-sm">
+                Se încarcă comentariile...
+              </div>
+            ) : comments.length > 0 ? (
+              <div className="space-y-3 max-h-60 overflow-y-auto">
+                {comments.map((comment) => (
+                  <div key={comment.id} className="flex gap-2 group">
+                    <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                      {comment.userImage ? (
+                        <img src={comment.userImage} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-gray-300 flex items-center justify-center">
+                          <span className="text-gray-600 text-sm font-bold">{comment.userName?.charAt(0) || 'U'}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 bg-gray-50 rounded-xl px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm text-gray-900">{comment.userName}</span>
+                          <span className="text-xs text-gray-400">{formatDate(comment.createdAt)}</span>
+                        </div>
+                        {user?.uid === comment.userId && (
+                          <button
+                            onClick={() => handleDeleteComment(comment.id)}
+                            disabled={deletingCommentId === comment.id}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-all"
+                            title="Șterge comentariul"
+                          >
+                            {deletingCommentId === comment.id ? (
+                              <span className="w-4 h-4 block border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-700 mt-0.5">{comment.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-4 text-center text-gray-500 text-sm">
+                Nu există comentarii încă. Fii primul care comentează!
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Content */}
         <div className="px-3 pb-3 md:px-4">

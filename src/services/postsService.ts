@@ -20,10 +20,14 @@ import {
   DocumentSnapshot,
   startAfter,
   QueryDocumentSnapshot,
+  arrayUnion,
+  arrayRemove,
+  increment,
+  orderBy,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, COLLECTIONS } from '@/lib/firebase';
-import { Post, MediaItem, CategoryKey, CreatePostData } from '@/types';
+import { Post, MediaItem, CategoryKey, CreatePostData, Comment } from '@/types';
 import { timestampToDate, getTimestampValue } from '@/lib/utils';
 import { postsCache } from '@/lib/cache';
 
@@ -125,6 +129,9 @@ function docToPost(doc: QueryDocumentSnapshot | DocumentSnapshot): Post {
     status: data.status || 'active',
     views: data.views || 0,
     saves: data.likeCount || data.saves || 0, // REAL field is 'likeCount'
+    likes: data.likes || [],
+    likesCount: data.likesCount || data.likes?.length || 0,
+    commentsCount: data.commentsCount || 0,
     createdAt: timestampToDate(data.createdAt),
     updatedAt: timestampToDate(data.updatedAt),
   };
@@ -556,3 +563,152 @@ export async function searchPosts(searchQuery: string, posts: Post[]): Promise<P
     );
   });
 }
+
+/**
+ * Like a post
+ */
+export async function likePost(postId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const postRef = doc(db, COLLECTIONS.PRODUCTS, postId);
+    await updateDoc(postRef, {
+      likes: arrayUnion(userId),
+      likesCount: increment(1),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('Error liking post:', error);
+    return { success: false, error: 'Eroare la apreciere' };
+  }
+}
+
+/**
+ * Unlike a post
+ */
+export async function unlikePost(postId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const postRef = doc(db, COLLECTIONS.PRODUCTS, postId);
+    await updateDoc(postRef, {
+      likes: arrayRemove(userId),
+      likesCount: increment(-1),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('Error unliking post:', error);
+    return { success: false, error: 'Eroare la eliminarea aprecierii' };
+  }
+}
+
+/**
+ * Check if user has liked a post
+ */
+export async function hasUserLikedPost(postId: string, userId: string): Promise<boolean> {
+  try {
+    const postDoc = await getDoc(doc(db, COLLECTIONS.PRODUCTS, postId));
+    if (postDoc.exists()) {
+      const likes = postDoc.data().likes || [];
+      return likes.includes(userId);
+    }
+    return false;
+  } catch (error) {
+    console.error('Error checking like status:', error);
+    return false;
+  }
+}
+
+/**
+ * Add a comment to a post
+ */
+export async function addComment(
+  postId: string,
+  userId: string,
+  userName: string,
+  userImage: string | undefined,
+  text: string
+): Promise<{ success: boolean; comment?: Comment; error?: string }> {
+  try {
+    // Add comment to subcollection
+    const commentsRef = collection(db, COLLECTIONS.PRODUCTS, postId, 'comments');
+    const commentDoc = await addDoc(commentsRef, {
+      postId,
+      userId,
+      userName,
+      userImage: userImage || '',
+      text,
+      createdAt: serverTimestamp(),
+    });
+
+    // Update comments count on post
+    const postRef = doc(db, COLLECTIONS.PRODUCTS, postId);
+    await updateDoc(postRef, {
+      commentsCount: increment(1),
+    });
+
+    const newComment: Comment = {
+      id: commentDoc.id,
+      postId,
+      userId,
+      userName,
+      userImage,
+      text,
+      createdAt: new Date(),
+    };
+
+    return { success: true, comment: newComment };
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    return { success: false, error: 'Eroare la adăugarea comentariului' };
+  }
+}
+
+/**
+ * Get comments for a post
+ */
+export async function getComments(postId: string): Promise<Comment[]> {
+  try {
+    const commentsRef = collection(db, COLLECTIONS.PRODUCTS, postId, 'comments');
+    const q = query(commentsRef, orderBy('createdAt', 'desc'), limit(50));
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        postId: data.postId,
+        userId: data.userId,
+        userName: data.userName,
+        userImage: data.userImage,
+        text: data.text,
+        createdAt: timestampToDate(data.createdAt),
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching comments:', error);
+    return [];
+  }
+}
+
+/**
+ * Delete a comment from a post
+ */
+export async function deleteComment(
+  postId: string,
+  commentId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Delete comment from subcollection
+    const commentRef = doc(db, COLLECTIONS.PRODUCTS, postId, 'comments', commentId);
+    await deleteDoc(commentRef);
+
+    // Update comments count on post
+    const postRef = doc(db, COLLECTIONS.PRODUCTS, postId);
+    await updateDoc(postRef, {
+      commentsCount: increment(-1),
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    return { success: false, error: 'Eroare la ștergerea comentariului' };
+  }
+}
+

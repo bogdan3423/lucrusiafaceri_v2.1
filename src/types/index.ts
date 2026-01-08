@@ -36,6 +36,17 @@ export interface User {
   updatedAt: Date | null;
 }
 
+// Comment model
+export interface Comment {
+  id: string;
+  postId: string;
+  userId: string;
+  userName: string;
+  userImage?: string;
+  text: string;
+  createdAt: Date | null;
+}
+
 // Post model - matches existing Firestore 'products' collection
 export interface Post {
   id: string;
@@ -56,6 +67,9 @@ export interface Post {
   status: 'active' | 'inactive' | 'sold' | 'deleted';
   views?: number;
   saves?: number;
+  likes?: string[]; // Array of user IDs who liked
+  likesCount?: number;
+  commentsCount?: number;
   createdAt: Date | null;
   updatedAt: Date | null;
 }
