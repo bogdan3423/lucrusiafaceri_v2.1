@@ -27,6 +27,18 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'ucarecdn.com',
       },
+      {
+        protocol: 'https',
+        hostname: '*.ucarecdn.com',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.ucarecnd.net',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.ucarecd.net',
+      },
     ],
     // Allow unoptimized images as fallback
     unoptimized: false,

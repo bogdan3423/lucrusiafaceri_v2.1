@@ -17,7 +17,8 @@ import {
   LogIn, 
   UserPlus,
   Menu,
-  X
+  X,
+  Shield
 } from 'lucide-react';
 
 export default function Header() {
@@ -66,6 +67,11 @@ export default function Header() {
                 <NavLink href="/setari" icon={<Settings className="w-5 h-5" />}>
                   Setări
                 </NavLink>
+                {user.role === 'admin' && (
+                  <NavLink href="/admin" icon={<Shield className="w-5 h-5" />}>
+                    Admin
+                  </NavLink>
+                )}
                 <button
                   onClick={handleSignOut}
                   className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -110,6 +116,11 @@ export default function Header() {
                   <MobileNavLink href="/setari" icon={<Settings className="w-5 h-5" />} onClick={() => setMobileMenuOpen(false)}>
                     Setări
                   </MobileNavLink>
+                  {user.role === 'admin' && (
+                    <MobileNavLink href="/admin" icon={<Shield className="w-5 h-5" />} onClick={() => setMobileMenuOpen(false)}>
+                      Admin
+                    </MobileNavLink>
+                  )}
                   <button
                     onClick={handleSignOut}
                     className="flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors w-full text-left"
