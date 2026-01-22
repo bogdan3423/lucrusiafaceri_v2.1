@@ -22,23 +22,22 @@ import { preloadImages } from '@/components/ui/OptimizedImage';
 const INITIAL_LOAD_COUNT = 5;
 const PREFETCH_THRESHOLD = 800;
 
-// Helper to extract image URLs from posts for preloading
-const extractImageUrls = (posts: Post[], maxPosts = 3, maxImagesPerPost = 2): string[] => {
+// Helper to extract ALL image URLs from posts for preloading
+const extractImageUrls = (posts: Post[]): string[] => {
   const urls: string[] = [];
-  for (let i = 0; i < Math.min(posts.length, maxPosts); i++) {
-    const post = posts[i];
+  for (const post of posts) {
     const images = post.media?.filter(m => m.type === 'image') || [];
     const imageUrls = post.images || [];
     
     // Get URLs from media array first
-    for (let j = 0; j < Math.min(images.length, maxImagesPerPost); j++) {
-      urls.push(images[j].url);
+    for (const img of images) {
+      urls.push(img.url);
     }
     
     // Fallback to images array
     if (images.length === 0) {
-      for (let j = 0; j < Math.min(imageUrls.length, maxImagesPerPost); j++) {
-        urls.push(imageUrls[j]);
+      for (const url of imageUrls) {
+        urls.push(url);
       }
     }
   }
@@ -85,8 +84,8 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       
       const postsArray = Array.isArray(result.posts) ? result.posts : [];
       
-      // Preload images from first few posts for instant display
-      const imageUrls = extractImageUrls(postsArray, 4, 3);
+      // Preload ALL images from posts for instant display
+      const imageUrls = extractImageUrls(postsArray);
       if (imageUrls.length > 0) {
         preloadImages(imageUrls);
       }
@@ -117,8 +116,8 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       prefetchedLastDocRef.current = result.lastDoc;
       prefetchHasMoreRef.current = result.hasMore;
       
-      // Preload images from prefetched posts in background
-      const imageUrls = extractImageUrls(postsArray, 3, 2);
+      // Preload ALL images from prefetched posts in background
+      const imageUrls = extractImageUrls(postsArray);
       if (imageUrls.length > 0) {
         preloadImages(imageUrls);
       }
