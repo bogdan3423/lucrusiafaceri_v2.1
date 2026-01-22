@@ -6,7 +6,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { PlusCircle, Hammer, Car, Home, ShoppingBag, Briefcase, Heart } from 'lucide-react';
+import { PlusCircle, Hammer, Car, Home, ShoppingBag, Calculator, Wheat } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import PostFeed from '@/components/posts/PostFeed';
 import { CATEGORIES } from '@/types';
@@ -29,13 +29,13 @@ const categoryStyles: Record<string, { icon: React.ReactNode; gradient: string }
     icon: <ShoppingBag className="w-5 h-5 text-white" />, 
     gradient: 'bg-gradient-to-br from-orange-500 to-red-500' 
   },
-  jobs: { 
-    icon: <Briefcase className="w-5 h-5 text-white" />, 
+  contabilitate: { 
+    icon: <Calculator className="w-5 h-5 text-white" />, 
     gradient: 'bg-gradient-to-br from-green-400 to-emerald-600' 
   },
-  dating: { 
-    icon: <Heart className="w-5 h-5 text-white" />, 
-    gradient: 'bg-gradient-to-br from-pink-400 to-rose-600' 
+  agropiata: { 
+    icon: <Wheat className="w-5 h-5 text-white" />, 
+    gradient: 'bg-gradient-to-br from-lime-400 to-green-600' 
   },
 };
 

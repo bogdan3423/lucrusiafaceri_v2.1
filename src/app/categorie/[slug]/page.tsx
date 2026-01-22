@@ -7,7 +7,7 @@
 import React from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Hammer, Car, Home, ShoppingBag, Briefcase, Heart } from 'lucide-react';
+import { ArrowLeft, Hammer, Car, Home, ShoppingBag, Calculator, Wheat } from 'lucide-react';
 import PostFeed from '@/components/posts/PostFeed';
 import { CategoryKey, CATEGORY_LABELS } from '@/types';
 
@@ -17,8 +17,8 @@ const categoryIcons: Record<string, React.ReactNode> = {
   auto: <Car className="w-6 h-6" />,
   imobiliare: <Home className="w-6 h-6" />,
   bazar: <ShoppingBag className="w-6 h-6" />,
-  jobs: <Briefcase className="w-6 h-6" />,
-  dating: <Heart className="w-6 h-6" />,
+  contabilitate: <Calculator className="w-6 h-6" />,
+  agropiata: <Wheat className="w-6 h-6" />,
 };
 
 // Category colors
@@ -27,8 +27,8 @@ const categoryColors: Record<string, string> = {
   auto: 'from-blue-500 to-blue-600',
   imobiliare: 'from-green-500 to-green-600',
   bazar: 'from-purple-500 to-purple-600',
-  jobs: 'from-indigo-500 to-indigo-600',
-  dating: 'from-pink-500 to-pink-600',
+  contabilitate: 'from-emerald-500 to-emerald-600',
+  agropiata: 'from-lime-500 to-green-600',
 };
 
 export default function CategoryPage() {
@@ -36,7 +36,7 @@ export default function CategoryPage() {
   const category = params.slug as CategoryKey;
   
   const categoryLabel = CATEGORY_LABELS[category] || category;
-  const categoryIcon = categoryIcons[category] || <Briefcase className="w-6 h-6" />;
+  const categoryIcon = categoryIcons[category] || <Hammer className="w-6 h-6" />;
   const categoryColor = categoryColors[category] || 'from-blue-500 to-blue-600';
 
   return (

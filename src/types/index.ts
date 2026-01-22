@@ -12,7 +12,7 @@ export interface MediaItem {
 }
 
 // Category definitions
-export type CategoryKey = 'construction' | 'auto' | 'imobiliare' | 'bazar' | 'jobs' | 'dating';
+export type CategoryKey = 'construction' | 'auto' | 'imobiliare' | 'bazar' | 'contabilitate' | 'agropiata';
 
 export interface Category {
   key: CategoryKey;
@@ -111,8 +111,8 @@ export const CATEGORIES: Category[] = [
   { key: 'auto', label: 'Auto', icon: 'Car' },
   { key: 'imobiliare', label: 'Imobiliare', icon: 'Home' },
   { key: 'bazar', label: 'Bazar', icon: 'ShoppingBag' },
-  { key: 'jobs', label: 'Locuri de Muncă', icon: 'Briefcase' },
-  { key: 'dating', label: 'Întâlniri', icon: 'Heart' },
+  { key: 'contabilitate', label: 'Contabilitate', icon: 'Calculator' },
+  { key: 'agropiata', label: 'Piața Agroalimentară', icon: 'Wheat' },
 ];
 
 export const CATEGORY_LABELS: Record<CategoryKey, string> = {
@@ -120,6 +120,6 @@ export const CATEGORY_LABELS: Record<CategoryKey, string> = {
   auto: 'Auto',
   imobiliare: 'Imobiliare',
   bazar: 'Bazar',
-  jobs: 'Locuri de Muncă',
-  dating: 'Întâlniri',
+  contabilitate: 'Contabilitate',
+  agropiata: 'Piața Agroalimentară',
 };

@@ -7,13 +7,14 @@
  * - All media rendered at once (no lazy rendering per slide)
  * - Smooth CSS transform-based sliding
  * - Videos show first frame immediately
+ * - Preload all images for instant switching
  * - No visible loading states
  */
 
-import React, { useState, useRef, useCallback, memo } from 'react';
+import React, { useState, useRef, useCallback, memo, useEffect, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
 import { MediaItem } from '@/types';
-import OptimizedImage from '@/components/ui/OptimizedImage';
+import OptimizedImage, { preloadImages } from '@/components/ui/OptimizedImage';
 import LazyVideo from '@/components/ui/LazyVideo';
 
 interface MediaCarouselProps {
@@ -31,6 +32,19 @@ const MediaCarousel = memo(function MediaCarousel({
   const touchDeltaX = useRef<number>(0);
   const isDragging = useRef(false);
   const [dragOffset, setDragOffset] = useState(0);
+
+  // Extract all image URLs for preloading
+  const imageUrls = useMemo(() => 
+    media.filter(m => m.type === 'image').map(m => m.url), 
+    [media]
+  );
+
+  // Preload all images in the carousel for instant switching
+  useEffect(() => {
+    if (imageUrls.length > 0) {
+      preloadImages(imageUrls);
+    }
+  }, [imageUrls]);
 
   const handleImageError = useCallback((index: number) => {
     setImageErrors(prev => new Set(prev).add(index));

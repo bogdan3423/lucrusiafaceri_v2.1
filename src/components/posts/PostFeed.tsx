@@ -16,10 +16,34 @@ import { RefreshCw } from 'lucide-react';
 import { Post, CategoryKey } from '@/types';
 import { fetchPosts, fetchAllPosts } from '@/services/postsService';
 import PostCard from '@/components/posts/PostCard';
+import { preloadImages } from '@/components/ui/OptimizedImage';
 
 // Constants
 const INITIAL_LOAD_COUNT = 5;
 const PREFETCH_THRESHOLD = 800;
+
+// Helper to extract image URLs from posts for preloading
+const extractImageUrls = (posts: Post[], maxPosts = 3, maxImagesPerPost = 2): string[] => {
+  const urls: string[] = [];
+  for (let i = 0; i < Math.min(posts.length, maxPosts); i++) {
+    const post = posts[i];
+    const images = post.media?.filter(m => m.type === 'image') || [];
+    const imageUrls = post.images || [];
+    
+    // Get URLs from media array first
+    for (let j = 0; j < Math.min(images.length, maxImagesPerPost); j++) {
+      urls.push(images[j].url);
+    }
+    
+    // Fallback to images array
+    if (images.length === 0) {
+      for (let j = 0; j < Math.min(imageUrls.length, maxImagesPerPost); j++) {
+        urls.push(imageUrls[j]);
+      }
+    }
+  }
+  return urls;
+};
 
 interface PostFeedProps {
   category?: CategoryKey | null;
@@ -61,6 +85,12 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       
       const postsArray = Array.isArray(result.posts) ? result.posts : [];
       
+      // Preload images from first few posts for instant display
+      const imageUrls = extractImageUrls(postsArray, 4, 3);
+      if (imageUrls.length > 0) {
+        preloadImages(imageUrls);
+      }
+      
       setPosts(postsArray);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
@@ -86,6 +116,12 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       prefetchedPostsRef.current = postsArray;
       prefetchedLastDocRef.current = result.lastDoc;
       prefetchHasMoreRef.current = result.hasMore;
+      
+      // Preload images from prefetched posts in background
+      const imageUrls = extractImageUrls(postsArray, 3, 2);
+      if (imageUrls.length > 0) {
+        preloadImages(imageUrls);
+      }
     } catch (err) {
       console.error('Error prefetching posts:', err);
     } finally {

@@ -244,7 +244,7 @@ async function fetchPostsFromFirestore(
 
   // Filter by category client-side
   if (category && category !== 'all') {
-    const otherCategories: CategoryKey[] = ['auto', 'imobiliare', 'bazar', 'jobs', 'dating'];
+    const otherCategories: CategoryKey[] = ['auto', 'imobiliare', 'bazar', 'contabilitate', 'agropiata'];
     
     if (category === 'construction') {
       // Construction: posts without category or with category 'construction'
