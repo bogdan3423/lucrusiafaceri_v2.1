@@ -6,8 +6,7 @@
 
 import React from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, Hammer, Car, Home, ShoppingBag, Calculator, Wheat } from 'lucide-react';
+import { Hammer, Car, Home, ShoppingBag, Calculator, Wheat } from 'lucide-react';
 import PostFeed from '@/components/posts/PostFeed';
 import CategoryNav from '@/components/layout/CategoryNav';
 import { CategoryKey, CATEGORY_LABELS } from '@/types';
@@ -42,34 +41,38 @@ export default function CategoryPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Category Navigation Bar */}
-      <CategoryNav activeCategory={category} />
-
-      <div className="md:max-w-2xl lg:max-w-4xl md:mx-auto md:px-6 lg:px-8 md:py-8">
-        {/* Back button */}
-        <Link
-          href="/"
-          className="inline-flex items-center space-x-2 text-gray-600 hover:text-blue-600 px-3 py-3 md:px-0 md:mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Înapoi la feed</span>
-        </Link>
-
-        {/* Category Header - Full-width on mobile */}
-        <div className={`bg-gradient-to-r ${categoryColor} md:rounded-xl p-4 md:p-6 mb-2 md:mb-8 text-white`}>
-          <div className="flex items-center space-x-4">
+      {/* Category Header - Full-width gradient banner at top (like main page) */}
+      <div className={`relative overflow-hidden bg-gradient-to-br ${categoryColor} p-5 md:rounded-2xl md:p-8 md:mx-4 lg:mx-auto lg:max-w-4xl lg:mt-8 text-white`}>
+        {/* Decorative elements */}
+        <div className="absolute top-0 right-0 w-40 h-40 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+        <div className="absolute top-1/2 right-8 w-20 h-20 bg-white/10 rounded-full hidden md:block" />
+        
+        {/* Content */}
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-2">
             <div className="w-12 h-12 md:w-14 md:h-14 bg-white/20 rounded-xl flex items-center justify-center">
               {categoryIcon}
             </div>
-            <div>
-              <h1 className="text-xl md:text-2xl lg:text-3xl font-bold">{categoryLabel}</h1>
-              <p className="text-white/80 mt-1 text-sm md:text-base">
-                Descoperă cele mai noi anunțuri din categoria {categoryLabel.toLowerCase()}
-              </p>
-            </div>
+            <span className="px-2 py-0.5 bg-white/15 backdrop-blur-sm text-[10px] md:text-xs font-medium rounded-full uppercase tracking-wide">
+              Categorie
+            </span>
           </div>
+          <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-2 md:mb-3 tracking-tight">
+            {categoryLabel}
+          </h1>
+          <p className="text-white/80 text-sm md:text-base max-w-lg leading-relaxed">
+            Descoperă cele mai noi anunțuri din categoria {categoryLabel.toLowerCase()}
+          </p>
         </div>
+      </div>
 
+      {/* Category Navigation Bar */}
+      <div className="lg:max-w-4xl lg:mx-auto">
+        <CategoryNav activeCategory={category} />
+      </div>
+
+      <div className="md:max-w-2xl lg:max-w-4xl md:mx-auto md:px-6 lg:px-8 md:py-4">
         {/* Posts Feed */}
         <PostFeed category={category} />
       </div>
