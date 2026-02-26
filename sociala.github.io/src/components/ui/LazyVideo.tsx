@@ -1,14 +1,16 @@
 'use client';
 
 /**
- * Lazy Video Component - Auto-Play with Sound
+ * Lazy Video Component - Reliable Auto-Play with Sound
  * 
  * KEY PRINCIPLES:
- * - Uses IntersectionObserver to auto-play when scrolled into view
- * - Plays with sound by default (falls back to muted if browser blocks)
- * - Pauses automatically when scrolled out of view
+ * - Only renders <video> when near viewport (300px margin) — saves bandwidth
+ * - Always starts MUTED for guaranteed autoplay (browsers allow muted autoplay)
+ * - Immediately tries to unmute after play starts
+ * - Uses onCanPlay to trigger play when video data is actually ready
+ * - Single IntersectionObserver on the container for play/pause
+ * - Pauses when scrolled out, resumes when scrolled back in
  * - User can tap to pause/play and toggle mute
- * - preload="auto" for smooth playback
  */
 
 import React, { useState, useRef, useEffect, memo, useCallback } from 'react';
@@ -30,48 +32,91 @@ const LazyVideo = memo(function LazyVideo({
   autoShowControls = false,
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isReady, setIsReady] = useState(false);
+  const [isMuted, setIsMuted] = useState(true); // Start muted for guaranteed autoplay
+  const [isNearView, setIsNearView] = useState(false);
   const [isInView, setIsInView] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   const [userMuted, setUserMuted] = useState(false);
-  const [browserBlockedAudio, setBrowserBlockedAudio] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isInViewRef = useRef(false);
+  const userPausedRef = useRef(false);
+  const userMutedRef = useRef(false);
 
-  // Build video source URL with time fragment for first frame
-  const videoSrcWithTime = `${src}#t=0.001`;
+  // Keep refs in sync for use inside callbacks/observers
+  useEffect(() => { isInViewRef.current = isInView; }, [isInView]);
+  useEffect(() => { userPausedRef.current = userPaused; }, [userPaused]);
+  useEffect(() => { userMutedRef.current = userMuted; }, [userMuted]);
 
-  // Listen for first user interaction on the page to unlock audio
+  // Try to unmute a playing video
+  const tryUnmute = useCallback((video: HTMLVideoElement) => {
+    if (userMutedRef.current) return; // User chose mute, respect it
+    try {
+      video.muted = false;
+      setIsMuted(false);
+    } catch {
+      // Browser blocked unmute, stay muted
+      video.muted = true;
+      setIsMuted(true);
+    }
+  }, []);
+
+  // Core play function — always muted first, then try unmute
+  const startPlayback = useCallback((video: HTMLVideoElement) => {
+    video.preload = 'auto';
+    // Always start muted — browsers guarantee this works
+    video.muted = true;
+    setIsMuted(true);
+    
+    const playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        // Playing! Now try to unmute
+        tryUnmute(video);
+      }).catch(() => {
+        // Even muted play failed (very rare) — do nothing
+      });
+    }
+  }, [tryUnmute]);
+
+  // Listen for first user interaction to unlock audio
   useEffect(() => {
-    if (!browserBlockedAudio || userMuted) return;
-
     const unlockAudio = () => {
       const video = videoRef.current;
-      if (video && !userMuted) {
+      if (video && !userMutedRef.current && video.muted) {
         video.muted = false;
         setIsMuted(false);
-        setBrowserBlockedAudio(false);
       }
-      // Remove listeners after first interaction
-      document.removeEventListener('click', unlockAudio);
-      document.removeEventListener('touchstart', unlockAudio);
-      document.removeEventListener('scroll', unlockAudio);
     };
 
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('touchstart', unlockAudio, { once: true });
-    document.addEventListener('scroll', unlockAudio, { once: true });
 
     return () => {
       document.removeEventListener('click', unlockAudio);
       document.removeEventListener('touchstart', unlockAudio);
-      document.removeEventListener('scroll', unlockAudio);
     };
-  }, [browserBlockedAudio, userMuted]);
+  }, []);
 
-  // IntersectionObserver - auto-play when visible, pause when not
+  // Observer: Detect when container is NEAR viewport — mount the <video> element
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsNearView(entry.isIntersecting);
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Observer: Detect when container is 40% visible — play/pause
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -84,48 +129,36 @@ const LazyVideo = memo(function LazyVideo({
         const video = videoRef.current;
         if (!video) return;
 
-        if (visible && !userPaused) {
-          // Always try unmuted first (sound ON), unless user chose to mute
-          if (!userMuted) {
-            video.muted = false;
-            setIsMuted(false);
-          }
-          video.play().catch(() => {
-            // Browser blocked unmuted autoplay — fall back to muted but remember
-            video.muted = true;
-            setIsMuted(true);
-            setBrowserBlockedAudio(true);
-            video.play().catch(() => {});
-          });
+        if (visible && !userPausedRef.current) {
+          startPlayback(video);
         } else if (!visible) {
           video.pause();
+          video.preload = 'metadata';
         }
       },
-      { threshold: 0.5 }
+      { threshold: 0.4 }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [userPaused, userMuted]);
+  }, [startPlayback]);
+
+  // When video becomes ready AND is in view — auto-play
+  // This handles the race condition: video mounts after observer already fired
+  const handleCanPlay = useCallback(() => {
+    setVideoReady(true);
+    const video = videoRef.current;
+    if (video && isInViewRef.current && !userPausedRef.current) {
+      startPlayback(video);
+    }
+  }, [startPlayback]);
 
   // Handle metadata loaded - seek to get first frame
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
-    if (video) {
-      if (video.currentTime === 0) {
-        video.currentTime = 0.001;
-      }
+    if (video && video.currentTime === 0) {
+      video.currentTime = 0.001;
     }
-  }, []);
-
-  // Handle seeked - first frame is now visible
-  const handleSeeked = useCallback(() => {
-    setIsReady(true);
-  }, []);
-
-  // Handle can play
-  const handleCanPlay = useCallback(() => {
-    setIsReady(true);
   }, []);
 
   // Container click handler - toggle play/pause
@@ -134,7 +167,6 @@ const LazyVideo = memo(function LazyVideo({
     e.preventDefault();
 
     const target = e.target as HTMLElement;
-    // Don't handle if clicking on mute button
     if (target.closest('[data-mute-btn]')) return;
 
     const video = videoRef.current;
@@ -146,14 +178,9 @@ const LazyVideo = memo(function LazyVideo({
       setUserPaused(true);
     } else {
       setUserPaused(false);
-      video.play().catch(() => {
-        video.muted = true;
-        setIsMuted(true);
-        video.play().catch(() => {});
-      });
-      setIsPlaying(true);
+      startPlayback(video);
     }
-  }, [isPlaying]);
+  }, [isPlaying, startPlayback]);
 
   // Toggle mute
   const toggleMute = useCallback((e: React.MouseEvent) => {
@@ -165,7 +192,6 @@ const LazyVideo = memo(function LazyVideo({
       video.muted = newMuted;
       setIsMuted(newMuted);
       setUserMuted(newMuted);
-      if (!newMuted) setBrowserBlockedAudio(false);
     }
   }, [isMuted]);
 
@@ -184,30 +210,40 @@ const LazyVideo = memo(function LazyVideo({
       className={`relative w-full h-full overflow-hidden cursor-pointer bg-gray-900 ${containerClassName}`}
       onClick={handleContainerClick}
     >
-      <video
-        ref={videoRef}
-        src={videoSrcWithTime}
-        className={`w-full h-full object-cover ${className}`}
-        muted={isMuted}
-        playsInline
-        preload="auto"
-        poster={poster}
-        onLoadedMetadata={handleLoadedMetadata}
-        onCanPlay={handleCanPlay}
-        onSeeked={handleSeeked}
-        onEnded={handleEnded}
-        onPause={() => setIsPlaying(false)}
-        onPlay={() => setIsPlaying(true)}
-      />
+      {/* Only render video element when near viewport */}
+      {isNearView ? (
+        <video
+          ref={videoRef}
+          src={`${src}#t=0.001`}
+          className={`w-full h-full object-cover ${className}`}
+          muted={isMuted}
+          playsInline
+          preload="metadata"
+          poster={poster}
+          onLoadedMetadata={handleLoadedMetadata}
+          onCanPlay={handleCanPlay}
+          onEnded={handleEnded}
+          onPause={() => setIsPlaying(false)}
+          onPlay={() => setIsPlaying(true)}
+        />
+      ) : (
+        poster ? (
+          <img src={poster} className={`w-full h-full object-cover ${className}`} alt="" />
+        ) : (
+          <div className="w-full h-full bg-gray-900" />
+        )
+      )}
 
-      {/* Mute toggle button - always visible */}
-      <button
-        data-mute-btn
-        onClick={toggleMute}
-        className="absolute bottom-3 right-3 p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors z-10"
-      >
-        {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-      </button>
+      {/* Mute toggle button */}
+      {isNearView && (
+        <button
+          data-mute-btn
+          onClick={toggleMute}
+          className="absolute bottom-3 right-3 p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors z-10"
+        >
+          {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+        </button>
+      )}
     </div>
   );
 });
