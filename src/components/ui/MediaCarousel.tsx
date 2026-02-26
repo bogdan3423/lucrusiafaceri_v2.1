@@ -1,20 +1,20 @@
 'use client';
 
 /**
- * Media Carousel Component - Premium Swipeable Gallery
+ * MediaCarousel — Efficient swipeable media gallery
  * 
- * KEY PRINCIPLES:
- * - All media rendered at once (no lazy rendering per slide)
- * - Smooth CSS transform-based sliding
- * - Videos show first frame immediately
- * - Preload all images for instant switching
- * - No visible loading states
+ * STRATEGY:
+ * - Only renders current slide + 1 adjacent slide on each side (not all at once)
+ * - Videos only rendered when they are the current slide
+ * - CSS transform-based smooth sliding
+ * - Touch/swipe support for mobile
+ * - No bulk image preloading — each OptimizedImage handles its own lazy loading
  */
 
-import React, { useState, useRef, useCallback, memo, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, memo } from 'react';
 import { ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
 import { MediaItem } from '@/types';
-import OptimizedImage, { preloadImages } from '@/components/ui/OptimizedImage';
+import OptimizedImage from '@/components/ui/OptimizedImage';
 import LazyVideo from '@/components/ui/LazyVideo';
 
 interface MediaCarouselProps {
@@ -32,19 +32,6 @@ const MediaCarousel = memo(function MediaCarousel({
   const touchDeltaX = useRef<number>(0);
   const isDragging = useRef(false);
   const [dragOffset, setDragOffset] = useState(0);
-
-  // Extract all image URLs for preloading
-  const imageUrls = useMemo(() => 
-    media.filter(m => m.type === 'image').map(m => m.url), 
-    [media]
-  );
-
-  // Preload all images in the carousel for instant switching
-  useEffect(() => {
-    if (imageUrls.length > 0) {
-      preloadImages(imageUrls);
-    }
-  }, [imageUrls]);
 
   const handleImageError = useCallback((index: number) => {
     setImageErrors(prev => new Set(prev).add(index));
@@ -86,7 +73,13 @@ const MediaCarousel = memo(function MediaCarousel({
     }
   };
 
-  // Empty state
+  // Determine which slides to actually render (current ± 1)
+  const shouldRenderSlide = (index: number): boolean => {
+    if (media.length <= 3) return true; // Small carousels render everything
+    const diff = Math.abs(index - currentIndex);
+    return diff <= 1 || diff === media.length - 1; // Handle wrap-around
+  };
+
   if (!media || media.length === 0) {
     return (
       <div className="w-full aspect-[4/3] bg-gray-50 flex items-center justify-center rounded-lg">
@@ -111,7 +104,7 @@ const MediaCarousel = memo(function MediaCarousel({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Carousel Track - All media rendered, CSS transform for smooth sliding */}
+      {/* Carousel Track */}
       <div
         className="flex h-full will-change-transform"
         style={{ 
@@ -121,22 +114,37 @@ const MediaCarousel = memo(function MediaCarousel({
       >
         {media.map((item, index) => (
           <div key={index} className="w-full h-full flex-shrink-0">
-            {item.type === 'video' ? (
-              <LazyVideo
-                src={item.url}
-                poster={item.thumbnailUrl}
-              />
-            ) : imageErrors.has(index) ? (
-              <div className="w-full h-full flex items-center justify-center bg-gray-50 text-gray-300">
-                <ImageOff className="w-8 h-8" />
-              </div>
+            {shouldRenderSlide(index) ? (
+              item.type === 'video' ? (
+                // Only fully render video if it's the current slide
+                index === currentIndex ? (
+                  <LazyVideo src={item.url} poster={item.thumbnailUrl} />
+                ) : (
+                  <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+                    {item.thumbnailUrl ? (
+                      <img src={item.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+                        <ChevronRight className="w-6 h-6 text-white" />
+                      </div>
+                    )}
+                  </div>
+                )
+              ) : imageErrors.has(index) ? (
+                <div className="w-full h-full flex items-center justify-center bg-gray-50 text-gray-300">
+                  <ImageOff className="w-8 h-8" />
+                </div>
+              ) : (
+                <OptimizedImage
+                  src={item.url}
+                  alt=""
+                  priority={index === 0}
+                  onError={() => handleImageError(index)}
+                />
+              )
             ) : (
-              <OptimizedImage
-                src={item.url}
-                alt=""
-                priority={index === 0 || index === currentIndex}
-                onError={() => handleImageError(index)}
-              />
+              // Placeholder for far-away slides
+              <div className="w-full h-full bg-gray-100" />
             )}
           </div>
         ))}

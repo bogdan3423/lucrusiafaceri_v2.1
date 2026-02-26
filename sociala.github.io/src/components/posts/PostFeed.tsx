@@ -16,33 +16,11 @@ import { RefreshCw } from 'lucide-react';
 import { Post, CategoryKey } from '@/types';
 import { fetchPosts, fetchAllPosts } from '@/services/postsService';
 import PostCard from '@/components/posts/PostCard';
-import { preloadImages } from '@/components/ui/OptimizedImage';
 
 // Constants
 const INITIAL_LOAD_COUNT = 5;
 const PREFETCH_THRESHOLD = 800;
 
-// Helper to extract ALL image URLs from posts for preloading
-const extractImageUrls = (posts: Post[]): string[] => {
-  const urls: string[] = [];
-  for (const post of posts) {
-    const images = post.media?.filter(m => m.type === 'image') || [];
-    const imageUrls = post.images || [];
-    
-    // Get URLs from media array first
-    for (const img of images) {
-      urls.push(img.url);
-    }
-    
-    // Fallback to images array
-    if (images.length === 0) {
-      for (const url of imageUrls) {
-        urls.push(url);
-      }
-    }
-  }
-  return urls;
-};
 
 interface PostFeedProps {
   category?: CategoryKey | null;
@@ -84,12 +62,6 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       
       const postsArray = Array.isArray(result.posts) ? result.posts : [];
       
-      // Preload ALL images from posts for instant display
-      const imageUrls = extractImageUrls(postsArray);
-      if (imageUrls.length > 0) {
-        preloadImages(imageUrls);
-      }
-      
       setPosts(postsArray);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
@@ -115,12 +87,6 @@ export default function PostFeed({ category, initialPosts = [], userId }: PostFe
       prefetchedPostsRef.current = postsArray;
       prefetchedLastDocRef.current = result.lastDoc;
       prefetchHasMoreRef.current = result.hasMore;
-      
-      // Preload ALL images from prefetched posts in background
-      const imageUrls = extractImageUrls(postsArray);
-      if (imageUrls.length > 0) {
-        preloadImages(imageUrls);
-      }
     } catch (err) {
       console.error('Error prefetching posts:', err);
     } finally {

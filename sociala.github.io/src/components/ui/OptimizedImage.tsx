@@ -1,56 +1,18 @@
 'use client';
 
 /**
- * Optimized Image Component - Smart Loading Experience
+ * OptimizedImage — Lightweight, fast image component
  * 
- * KEY PRINCIPLES:
- * - Priority images (above the fold) load eagerly with high fetchPriority
- * - Non-priority images use lazy loading + IntersectionObserver
- * - Smooth fade-in transition when image loads
- * - Efficient caching to avoid reloads on navigation
- * - Batched preloading to avoid bandwidth contention
+ * STRATEGY:
+ * - Single IntersectionObserver triggers rendering when near viewport (400px margin)
+ * - No JS-side image cache — browser HTTP cache handles this natively
+ * - No bulk preloading — each image loads on its own when it enters the load zone
+ * - Simple fade-in on load; instant if browser-cached
+ * - Priority images skip observer and render immediately with fetchPriority="high"
  */
 
 import React, { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { ImageOff } from 'lucide-react';
-
-// Global image cache to track loaded images
-const imageCache = new Set<string>();
-
-// Preload an image and cache it
-export function preloadImage(src: string): Promise<void> {
-  if (imageCache.has(src)) {
-    return Promise.resolve();
-  }
-  
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      imageCache.add(src);
-      resolve();
-    };
-    img.onerror = () => resolve();
-    img.src = src;
-  });
-}
-
-// Batch preload images - max 3 concurrent to avoid bandwidth contention
-export function preloadImages(urls: string[]): void {
-  const uncached = urls.filter(url => !imageCache.has(url));
-  const batch = uncached.slice(0, 3);
-  batch.forEach(url => preloadImage(url));
-  
-  if (uncached.length > 3) {
-    setTimeout(() => {
-      preloadImages(uncached.slice(3));
-    }, 200);
-  }
-}
-
-// Check if image is cached
-export function isImageCached(src: string): boolean {
-  return imageCache.has(src);
-}
 
 interface OptimizedImageProps {
   src: string;
@@ -62,7 +24,6 @@ interface OptimizedImageProps {
   onLoad?: () => void;
   onError?: () => void;
   onClick?: () => void;
-  preloadNearby?: string[];
 }
 
 const OptimizedImage = memo(function OptimizedImage({
@@ -75,18 +36,19 @@ const OptimizedImage = memo(function OptimizedImage({
   onLoad,
   onError,
   onClick,
-  preloadNearby = [],
 }: OptimizedImageProps) {
-  const isCached = imageCache.has(src);
   const [hasError, setHasError] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(isCached);
-  const [isInView, setIsInView] = useState(priority || isCached);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [shouldRender, setShouldRender] = useState(priority);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
-  // IntersectionObserver for non-priority images - start loading 300px before viewport
+  // IntersectionObserver for non-priority images
   useEffect(() => {
-    if (priority || isCached) return;
+    if (priority) {
+      setShouldRender(true);
+      return;
+    }
 
     const el = containerRef.current;
     if (!el) return;
@@ -94,49 +56,44 @@ const OptimizedImage = memo(function OptimizedImage({
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setIsInView(true);
+          setShouldRender(true);
           observer.disconnect();
         }
       },
-      { rootMargin: '300px' }
+      { rootMargin: '400px' }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [priority, isCached]);
+  }, [priority]);
 
-  // Check if image is already complete on mount (browser cache)
+  // Reset state when src changes
   useEffect(() => {
-    if (imgRef.current?.complete && imgRef.current?.naturalWidth > 0) {
-      imageCache.add(src);
+    setHasError(false);
+    setIsLoaded(false);
+  }, [src]);
+
+  // Check if already loaded from browser cache on mount
+  useEffect(() => {
+    if (shouldRender && imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
       setIsLoaded(true);
       onLoad?.();
     }
-  }, [src, onLoad]);
-
-  // Preload nearby images after this one loads
-  useEffect(() => {
-    if (isLoaded && preloadNearby.length > 0) {
-      preloadImages(preloadNearby);
-    }
-  }, [isLoaded, preloadNearby]);
+  }, [shouldRender, onLoad]);
 
   const handleLoad = useCallback(() => {
-    imageCache.add(src);
     setIsLoaded(true);
     onLoad?.();
-  }, [src, onLoad]);
+  }, [onLoad]);
 
   const handleError = useCallback(() => {
     setHasError(true);
     onError?.();
   }, [onError]);
 
-  const objectFitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
-
   if (hasError) {
     return (
-      <div 
+      <div
         className={`w-full h-full flex items-center justify-center bg-gray-50 text-gray-300 ${containerClassName}`}
         onClick={onClick}
       >
@@ -145,20 +102,24 @@ const OptimizedImage = memo(function OptimizedImage({
     );
   }
 
+  const objectFitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
+
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`relative w-full h-full overflow-hidden bg-gray-100 ${containerClassName}`}
       onClick={onClick}
     >
-      {isInView && (
+      {shouldRender && (
         <img
           ref={imgRef}
           src={src}
           alt={alt}
-          className={`w-full h-full ${objectFitClass} transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'} ${className}`}
+          className={`w-full h-full ${objectFitClass} transition-opacity duration-200 ${
+            isLoaded ? 'opacity-100' : 'opacity-0'
+          } ${className}`}
           loading={priority ? 'eager' : 'lazy'}
-          decoding={priority ? 'sync' : 'async'}
+          decoding="async"
           fetchPriority={priority ? 'high' : 'auto'}
           onLoad={handleLoad}
           onError={handleError}

@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { MapPin, Clock, Share2, MoreHorizontal, ImageOff, ChevronLeft, ChevronRight, X, Play, Heart, MessageCircle, Send, Trash2 } from 'lucide-react';
 import { Post, MediaItem, Comment } from '@/types';
 import { formatDate, formatPrice } from '@/lib/utils';
-import OptimizedImage, { preloadImages } from '@/components/ui/OptimizedImage';
+import OptimizedImage from '@/components/ui/OptimizedImage';
 import LazyVideo from '@/components/ui/LazyVideo';
 import { useAuth } from '@/contexts/AuthContext';
 import { likePost, unlikePost, addComment, getComments, deleteComment } from '@/services/postsService';
@@ -68,14 +68,7 @@ const PostCard = memo(function PostCard({ post, priority = false }: PostCardProp
   // Separate images for lightbox
   const imageMedia = useMemo(() => media.filter(m => m.type === 'image'), [media]);
 
-  // Preload all images in this post for instant display
-  useEffect(() => {
-    if (priority && imageMedia.length > 0) {
-      // For priority posts, preload all images immediately
-      const urls = imageMedia.map(m => m.url);
-      preloadImages(urls);
-    }
-  }, [priority, imageMedia]);
+
 
   const authorName = post.userName || 'Anonim';
   const authorImage = post.userImage;
@@ -243,21 +236,15 @@ const PostCard = memo(function PostCard({ post, priority = false }: PostCardProp
       );
     }
     
-    // Get nearby image URLs for preloading
-    const nearbyImages = imageMedia
-      .filter((_, i) => i !== index && i >= index - 1 && i <= index + 2)
-      .map(m => m.url);
-    
     return (
       <OptimizedImage
         src={item.url}
         alt=""
         priority={priority && index === 0}
-        preloadNearby={nearbyImages}
         onError={() => handleImageError(index)}
       />
     );
-  }, [imageErrors, priority, handleImageError, imageMedia]);
+  }, [imageErrors, priority, handleImageError]);
 
   // Grid layout for media
   const renderMediaGrid = () => {
