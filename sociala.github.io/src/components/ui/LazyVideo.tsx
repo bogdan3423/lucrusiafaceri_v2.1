@@ -1,16 +1,15 @@
 'use client';
 
 /**
- * Lazy Video Component - Reliable Auto-Play with Sound
+ * Lazy Video Component - Bulletproof Mobile Auto-Play
  * 
  * KEY PRINCIPLES:
- * - Only renders <video> when near viewport (300px margin) — saves bandwidth
- * - Always starts MUTED for guaranteed autoplay (browsers allow muted autoplay)
- * - Immediately tries to unmute after play starts
- * - Uses onCanPlay to trigger play when video data is actually ready
- * - Single IntersectionObserver on the container for play/pause
- * - Pauses when scrolled out, resumes when scrolled back in
- * - User can tap to pause/play and toggle mute
+ * - <video> always in DOM with muted + autoPlay + playsInline (mobile requirement)
+ * - preload="none" by default, switched to "auto" only when near viewport
+ * - Single IntersectionObserver handles both loading and play/pause
+ * - onLoadedData fires play if in view (handles race condition)
+ * - Starts muted (guaranteed on all browsers), unmutes on first user tap
+ * - No conditional rendering of <video> — eliminates ref timing bugs
  */
 
 import React, { useState, useRef, useEffect, memo, useCallback } from 'react';
@@ -29,173 +28,147 @@ const LazyVideo = memo(function LazyVideo({
   poster,
   className = '',
   containerClassName = '',
-  autoShowControls = false,
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(true); // Start muted for guaranteed autoplay
-  const [isNearView, setIsNearView] = useState(false);
-  const [isInView, setIsInView] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [userPaused, setUserPaused] = useState(false);
   const [userMuted, setUserMuted] = useState(false);
-  const [videoReady, setVideoReady] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isInViewRef = useRef(false);
+  const isVisibleRef = useRef(false);
   const userPausedRef = useRef(false);
   const userMutedRef = useRef(false);
+  const hasTriedPlayRef = useRef(false);
 
-  // Keep refs in sync for use inside callbacks/observers
-  useEffect(() => { isInViewRef.current = isInView; }, [isInView]);
+  // Keep refs in sync
   useEffect(() => { userPausedRef.current = userPaused; }, [userPaused]);
   useEffect(() => { userMutedRef.current = userMuted; }, [userMuted]);
 
-  // Try to unmute a playing video
-  const tryUnmute = useCallback((video: HTMLVideoElement) => {
-    if (userMutedRef.current) return; // User chose mute, respect it
-    try {
-      video.muted = false;
-      setIsMuted(false);
-    } catch {
-      // Browser blocked unmute, stay muted
-      video.muted = true;
-      setIsMuted(true);
+  // Core play function
+  const triggerPlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || userPausedRef.current) return;
+    
+    // Ensure muted for autoplay (required on mobile)
+    video.muted = true;
+    
+    const p = video.play();
+    if (p) {
+      p.then(() => {
+        // Successfully playing. Try to unmute if user hasn't muted
+        if (!userMutedRef.current) {
+          try {
+            video.muted = false;
+            setIsMuted(false);
+          } catch {
+            video.muted = true;
+            setIsMuted(true);
+          }
+        }
+      }).catch(() => {
+        // Play failed — very rare for muted. Do nothing.
+      });
     }
   }, []);
 
-  // Core play function — always muted first, then try unmute
-  const startPlayback = useCallback((video: HTMLVideoElement) => {
-    video.preload = 'auto';
-    // Always start muted — browsers guarantee this works
-    video.muted = true;
-    setIsMuted(true);
-    
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.then(() => {
-        // Playing! Now try to unmute
-        tryUnmute(video);
-      }).catch(() => {
-        // Even muted play failed (very rare) — do nothing
-      });
-    }
-  }, [tryUnmute]);
-
-  // Listen for first user interaction to unlock audio
+  // Single IntersectionObserver — handles preload + play/pause
   useEffect(() => {
-    const unlockAudio = () => {
+    const el = containerRef.current;
+    const video = videoRef.current;
+    if (!el || !video) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const visible = entry.isIntersecting;
+        isVisibleRef.current = visible;
+
+        if (visible) {
+          // Start loading full video
+          video.preload = 'auto';
+          
+          if (!userPausedRef.current) {
+            hasTriedPlayRef.current = true;
+            triggerPlay();
+          }
+        } else {
+          // Pause and reduce bandwidth
+          video.pause();
+          video.preload = 'none';
+          hasTriedPlayRef.current = false;
+        }
+      },
+      { threshold: 0.3, rootMargin: '50px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [triggerPlay]);
+
+  // When video has enough data to play — handle race condition
+  // This fires AFTER the video element has buffered enough frames
+  const handleLoadedData = useCallback(() => {
+    if (isVisibleRef.current && !userPausedRef.current && !hasTriedPlayRef.current) {
+      hasTriedPlayRef.current = true;
+      triggerPlay();
+    }
+  }, [triggerPlay]);
+
+  // Also try on canplay for slower connections
+  const handleCanPlay = useCallback(() => {
+    if (isVisibleRef.current && !userPausedRef.current) {
+      triggerPlay();
+    }
+  }, [triggerPlay]);
+
+  // Unlock audio on first user interaction anywhere on page
+  useEffect(() => {
+    const unlock = () => {
       const video = videoRef.current;
       if (video && !userMutedRef.current && video.muted) {
         video.muted = false;
         setIsMuted(false);
       }
     };
-
-    document.addEventListener('click', unlockAudio, { once: true });
-    document.addEventListener('touchstart', unlockAudio, { once: true });
-
+    document.addEventListener('touchstart', unlock, { once: true });
+    document.addEventListener('click', unlock, { once: true });
     return () => {
-      document.removeEventListener('click', unlockAudio);
-      document.removeEventListener('touchstart', unlockAudio);
+      document.removeEventListener('touchstart', unlock);
+      document.removeEventListener('click', unlock);
     };
   }, []);
 
-  // Observer: Detect when container is NEAR viewport — mount the <video> element
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        setIsNearView(entry.isIntersecting);
-      },
-      { rootMargin: '300px' }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Observer: Detect when container is 40% visible — play/pause
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        const visible = entry.isIntersecting;
-        setIsInView(visible);
-
-        const video = videoRef.current;
-        if (!video) return;
-
-        if (visible && !userPausedRef.current) {
-          startPlayback(video);
-        } else if (!visible) {
-          video.pause();
-          video.preload = 'metadata';
-        }
-      },
-      { threshold: 0.4 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [startPlayback]);
-
-  // When video becomes ready AND is in view — auto-play
-  // This handles the race condition: video mounts after observer already fired
-  const handleCanPlay = useCallback(() => {
-    setVideoReady(true);
-    const video = videoRef.current;
-    if (video && isInViewRef.current && !userPausedRef.current) {
-      startPlayback(video);
-    }
-  }, [startPlayback]);
-
-  // Handle metadata loaded - seek to get first frame
-  const handleLoadedMetadata = useCallback(() => {
-    const video = videoRef.current;
-    if (video && video.currentTime === 0) {
-      video.currentTime = 0.001;
-    }
-  }, []);
-
-  // Container click handler - toggle play/pause
+  // Tap on video = toggle play/pause
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-mute-btn]')) return;
+    if ((e.target as HTMLElement).closest('[data-mute-btn]')) return;
 
     const video = videoRef.current;
     if (!video) return;
 
     if (isPlaying) {
       video.pause();
-      setIsPlaying(false);
       setUserPaused(true);
     } else {
       setUserPaused(false);
-      startPlayback(video);
+      triggerPlay();
     }
-  }, [isPlaying, startPlayback]);
+  }, [isPlaying, triggerPlay]);
 
   // Toggle mute
   const toggleMute = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     const video = videoRef.current;
-    if (video) {
-      const newMuted = !isMuted;
-      video.muted = newMuted;
-      setIsMuted(newMuted);
-      setUserMuted(newMuted);
-    }
+    if (!video) return;
+    const newMuted = !isMuted;
+    video.muted = newMuted;
+    setIsMuted(newMuted);
+    setUserMuted(newMuted);
   }, [isMuted]);
 
-  // Video ended handler - loop
+  // Loop video
   const handleEnded = useCallback(() => {
     const video = videoRef.current;
     if (video) {
@@ -205,45 +178,35 @@ const LazyVideo = memo(function LazyVideo({
   }, []);
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`relative w-full h-full overflow-hidden cursor-pointer bg-gray-900 ${containerClassName}`}
       onClick={handleContainerClick}
     >
-      {/* Only render video element when near viewport */}
-      {isNearView ? (
-        <video
-          ref={videoRef}
-          src={`${src}#t=0.001`}
-          className={`w-full h-full object-cover ${className}`}
-          muted={isMuted}
-          playsInline
-          preload="metadata"
-          poster={poster}
-          onLoadedMetadata={handleLoadedMetadata}
-          onCanPlay={handleCanPlay}
-          onEnded={handleEnded}
-          onPause={() => setIsPlaying(false)}
-          onPlay={() => setIsPlaying(true)}
-        />
-      ) : (
-        poster ? (
-          <img src={poster} className={`w-full h-full object-cover ${className}`} alt="" />
-        ) : (
-          <div className="w-full h-full bg-gray-900" />
-        )
-      )}
+      <video
+        ref={videoRef}
+        src={`${src}#t=0.001`}
+        className={`w-full h-full object-cover ${className}`}
+        muted
+        autoPlay
+        playsInline
+        preload="none"
+        poster={poster}
+        onLoadedData={handleLoadedData}
+        onCanPlay={handleCanPlay}
+        onEnded={handleEnded}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
+      />
 
-      {/* Mute toggle button */}
-      {isNearView && (
-        <button
-          data-mute-btn
-          onClick={toggleMute}
-          className="absolute bottom-3 right-3 p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors z-10"
-        >
-          {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-        </button>
-      )}
+      {/* Mute toggle */}
+      <button
+        data-mute-btn
+        onClick={toggleMute}
+        className="absolute bottom-3 right-3 p-2 bg-black/50 backdrop-blur-sm text-white rounded-full hover:bg-black/70 transition-colors z-10"
+      >
+        {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+      </button>
     </div>
   );
 });
