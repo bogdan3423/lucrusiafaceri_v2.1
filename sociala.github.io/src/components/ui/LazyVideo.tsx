@@ -30,7 +30,7 @@ const LazyVideo = memo(function LazyVideo({
   containerClassName = '',
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -41,18 +41,41 @@ const LazyVideo = memo(function LazyVideo({
 
   useEffect(() => { userPausedRef.current = userPaused; }, [userPaused]);
 
-  // Play video (always starts muted for browser compatibility)
+  // Play video with sound — try unmuted first, fall back to muted if browser blocks
   const tryPlay = useCallback(() => {
     const video = videoRef.current;
     if (!video || userPausedRef.current) return;
 
-    video.muted = true;
+    // First attempt: play with sound
+    video.muted = false;
     const p = video.play();
     if (p) {
-      p.catch(() => {
-        // Autoplay blocked — do nothing, user can tap to play
+      p.then(() => {
+        setIsMuted(false);
+      }).catch(() => {
+        // Browser blocked unmuted autoplay — fall back to muted
+        video.muted = true;
+        setIsMuted(true);
+        video.play().catch(() => {});
       });
     }
+  }, []);
+
+  // Unlock audio on first user interaction anywhere on page
+  useEffect(() => {
+    const unlock = () => {
+      const video = videoRef.current;
+      if (video && video.muted && isVisibleRef.current && !userPausedRef.current) {
+        video.muted = false;
+        setIsMuted(false);
+      }
+    };
+    document.addEventListener('click', unlock, { once: true });
+    document.addEventListener('touchstart', unlock, { once: true });
+    return () => {
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('touchstart', unlock);
+    };
   }, []);
 
   // Single IntersectionObserver with two thresholds:
@@ -128,8 +151,14 @@ const LazyVideo = memo(function LazyVideo({
       setUserPaused(true);
     } else {
       setUserPaused(false);
-      video.muted = true; // Ensure muted for play
-      video.play().catch(() => {});
+      // User tap counts as interaction — play with sound
+      video.muted = false;
+      setIsMuted(false);
+      video.play().catch(() => {
+        video.muted = true;
+        setIsMuted(true);
+        video.play().catch(() => {});
+      });
     }
   }, [isPlaying]);
 
@@ -163,7 +192,6 @@ const LazyVideo = memo(function LazyVideo({
         ref={videoRef}
         src={src}
         className={`w-full h-full object-cover ${className}`}
-        muted
         playsInline
         preload="none"
         poster={poster}
