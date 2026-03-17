@@ -8,7 +8,7 @@
  * - IntersectionObserver switches to preload="metadata" when near viewport (200px)
  * - Only starts playing when actually visible (threshold: 0.3)
  * - Pauses and stops buffering when scrolled away
- * - Starts muted (required for mobile autoplay), user can unmute via tap
+ * - ALWAYS starts muted — user must explicitly unmute via button
  * - Tap to toggle play/pause, mute button in corner
  * - Loops automatically
  */
@@ -30,7 +30,7 @@ const LazyVideo = memo(function LazyVideo({
   containerClassName = '',
 }: LazyVideoProps) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [userPaused, setUserPaused] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -41,41 +41,13 @@ const LazyVideo = memo(function LazyVideo({
 
   useEffect(() => { userPausedRef.current = userPaused; }, [userPaused]);
 
-  // Play video with sound — try unmuted first, fall back to muted if browser blocks
+  // Play video — always muted
   const tryPlay = useCallback(() => {
     const video = videoRef.current;
     if (!video || userPausedRef.current) return;
 
-    // First attempt: play with sound
-    video.muted = false;
-    const p = video.play();
-    if (p) {
-      p.then(() => {
-        setIsMuted(false);
-      }).catch(() => {
-        // Browser blocked unmuted autoplay — fall back to muted
-        video.muted = true;
-        setIsMuted(true);
-        video.play().catch(() => {});
-      });
-    }
-  }, []);
-
-  // Unlock audio on first user interaction anywhere on page
-  useEffect(() => {
-    const unlock = () => {
-      const video = videoRef.current;
-      if (video && video.muted && isVisibleRef.current && !userPausedRef.current) {
-        video.muted = false;
-        setIsMuted(false);
-      }
-    };
-    document.addEventListener('click', unlock, { once: true });
-    document.addEventListener('touchstart', unlock, { once: true });
-    return () => {
-      document.removeEventListener('click', unlock);
-      document.removeEventListener('touchstart', unlock);
-    };
+    video.muted = true;
+    video.play().catch(() => {});
   }, []);
 
   // Single IntersectionObserver with two thresholds:
@@ -103,17 +75,14 @@ const LazyVideo = memo(function LazyVideo({
         isVisibleRef.current = entry.isIntersecting;
 
         if (entry.isIntersecting) {
-          // Only start loading full video data when actually visible
           video.preload = 'auto';
           if (!userPausedRef.current) {
             tryPlay();
           }
         } else {
-          // Pause and stop buffering when not visible
           if (!video.paused) {
             video.pause();
           }
-          // Switch back to metadata-only to free memory/bandwidth
           video.preload = 'metadata';
         }
       },
@@ -137,7 +106,7 @@ const LazyVideo = memo(function LazyVideo({
     }
   }, [tryPlay]);
 
-  // Tap on video = toggle play/pause
+  // Tap on video = toggle play/pause (stays muted unless user unmutes)
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -151,18 +120,11 @@ const LazyVideo = memo(function LazyVideo({
       setUserPaused(true);
     } else {
       setUserPaused(false);
-      // User tap counts as interaction — play with sound
-      video.muted = false;
-      setIsMuted(false);
-      video.play().catch(() => {
-        video.muted = true;
-        setIsMuted(true);
-        video.play().catch(() => {});
-      });
+      video.play().catch(() => {});
     }
   }, [isPlaying]);
 
-  // Toggle mute
+  // Toggle mute — only way for user to unmute
   const toggleMute = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -193,6 +155,7 @@ const LazyVideo = memo(function LazyVideo({
         src={src}
         className={`w-full h-full object-cover ${className}`}
         playsInline
+        muted
         preload="none"
         poster={poster}
         onCanPlay={handleCanPlay}
@@ -210,8 +173,8 @@ const LazyVideo = memo(function LazyVideo({
         </div>
       )}
 
-      {/* Mute toggle */}
-      {isLoaded && (
+      {/* Mute/Unmute toggle — always visible so user can unmute */}
+      {isPlaying && (
         <button
           data-mute-btn
           onClick={toggleMute}
